@@ -5,6 +5,8 @@ import 'package:wifi_scan/features/discovery/application/network_discovery_servi
 import 'package:wifi_scan/features/discovery/domain/discovery_result.dart';
 import 'package:wifi_scan/features/discovery/domain/network_context.dart';
 import 'package:wifi_scan/features/inventory/domain/network_device.dart';
+import 'package:wifi_scan/features/inventory/application/inventory_repository.dart';
+import 'package:wifi_scan/features/inventory/domain/inventory_snapshot.dart';
 
 void main() {
   testWidgets('shows the network security dashboard', (tester) async {
@@ -22,13 +24,16 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      const WifiScanApp(discoveryService: _FakeDiscoveryService()),
+      WifiScanApp(
+        discoveryService: const _FakeDiscoveryService(),
+        inventoryRepository: InventoryRepository(store: _MemorySnapshotStore()),
+      ),
     );
 
     await tester.tap(find.text('현재 네트워크 검색 시작'));
     await tester.pumpAndSettle();
 
-    expect(find.text('검색이 완료되었습니다.'), findsOneWidget);
+    expect(find.textContaining('검색이 완료되었습니다.'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('이 Windows 컴퓨터'), 300);
     expect(find.text('이 Windows 컴퓨터'), findsOneWidget);
     expect(find.text('기본 게이트웨이'), findsOneWidget);
@@ -144,5 +149,19 @@ class _SlowDiscoveryService implements NetworkDiscoveryService {
       await Future<void>.delayed(const Duration(milliseconds: 5));
     }
     throw const DiscoveryCancelledException();
+  }
+}
+
+class _MemorySnapshotStore implements InventorySnapshotStore {
+  final List<InventorySnapshot> snapshots = [];
+
+  @override
+  Future<List<InventorySnapshot>> load() async => [...snapshots];
+
+  @override
+  Future<void> save(List<InventorySnapshot> value) async {
+    snapshots
+      ..clear()
+      ..addAll(value);
   }
 }

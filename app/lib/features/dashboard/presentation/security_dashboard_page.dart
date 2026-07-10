@@ -1,16 +1,29 @@
+import 'dart:io' as io;
+
 import 'package:flutter/material.dart';
 import 'package:wifi_scan/features/dashboard/domain/network_overview.dart';
 import 'package:wifi_scan/features/discovery/application/network_discovery_service.dart';
 import 'package:wifi_scan/features/discovery/domain/discovery_result.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/platform_network_discovery_service.dart';
 import 'package:wifi_scan/features/inventory/domain/network_device.dart';
+import 'package:wifi_scan/features/inventory/application/inventory_repository.dart';
 import 'package:wifi_scan/features/security/domain/security_finding.dart';
 import 'package:wifi_scan/features/discovery/domain/network_context.dart';
+import 'package:wifi_scan/features/security/application/security_risk_analyzer.dart';
+import 'package:wifi_scan/features/remediation/application/remediation_planner.dart';
+import 'package:wifi_scan/features/remediation/domain/remediation_plan.dart';
 
 class SecurityDashboardPage extends StatefulWidget {
-  const SecurityDashboardPage({super.key, this.discoveryService});
+  const SecurityDashboardPage({
+    super.key,
+    this.discoveryService,
+    this.inventoryRepository,
+    this.securityRiskAnalyzer,
+  });
 
   final NetworkDiscoveryService? discoveryService;
+  final InventoryRepository? inventoryRepository;
+  final SecurityRiskAnalyzer? securityRiskAnalyzer;
 
   @override
   State<SecurityDashboardPage> createState() => _SecurityDashboardPageState();
@@ -18,6 +31,8 @@ class SecurityDashboardPage extends StatefulWidget {
 
 class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   late final NetworkDiscoveryService _discoveryService;
+  late final InventoryRepository _inventoryRepository;
+  late final SecurityRiskAnalyzer _securityRiskAnalyzer;
   NetworkOverview _overview = const NetworkOverview.empty();
   DiscoveryResult? _lastResult;
   DiscoveryProgress? _progress;
@@ -26,16 +41,29 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   bool _messageIsError = false;
   bool _isScanning = false;
   bool _hasCompletedScan = false;
+  bool _securityAnalysisCompleted = false;
+  Set<String> _newDeviceIds = const {};
+  List<RemediationPlan> _remediationPlans = const [];
 
   @override
   void initState() {
     super.initState();
     _discoveryService =
         widget.discoveryService ?? createNetworkDiscoveryService();
+    _inventoryRepository =
+        widget.inventoryRepository ??
+        const InventoryRepository(store: FileInventorySnapshotStore());
+    _securityRiskAnalyzer =
+        widget.securityRiskAnalyzer ?? const SecurityRiskAnalyzer();
   }
 
   Future<void> _startScan() async {
     if (_isScanning) return;
+
+    if (io.Platform.isAndroid) {
+      final shouldContinue = await _showAndroidPermissionRationale();
+      if (shouldContinue != true || !mounted) return;
+    }
 
     final token = DiscoveryCancellationToken();
     setState(() {
@@ -55,16 +83,42 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         },
       );
       if (!mounted) return;
+      InventoryUpdate? inventoryUpdate;
+      var storageWarning = false;
+      try {
+        inventoryUpdate = await _inventoryRepository.record(result);
+      } catch (_) {
+        storageWarning = true;
+      }
+      final devices = inventoryUpdate?.snapshot.devices ?? result.devices;
+      final newDevices = inventoryUpdate?.newDevices ?? const [];
+      final findings = inventoryUpdate == null
+          ? const <SecurityFinding>[]
+          : _securityRiskAnalyzer
+                .analyze(
+                  snapshot: inventoryUpdate.snapshot,
+                  inventoryUpdate: inventoryUpdate,
+                )
+                .findings;
+      final remediationPlans = const ManualRemediationPlanner().build(findings);
       setState(() {
         _overview = NetworkOverview(
-          devices: result.devices,
-          findings: const [],
+          devices: devices,
+          findings: findings,
           lastScannedAt: DateTime.now(),
+          newDeviceCount: newDevices.length,
         );
         _lastResult = result;
+        _newDeviceIds = newDevices.map((device) => device.id).toSet();
+        _remediationPlans = remediationPlans;
         _hasCompletedScan = true;
-        _message = '검색이 완료되었습니다.';
-        _messageIsError = false;
+        _securityAnalysisCompleted = inventoryUpdate != null;
+        _message = storageWarning
+            ? '검색은 완료되었지만 장비 기록을 저장하지 못했습니다.'
+            : inventoryUpdate?.isBaseline == true
+            ? '검색이 완료되었습니다. 이번 결과를 기준선으로 저장했습니다.'
+            : '검색이 완료되었습니다. 신규 장비 ${newDevices.length}개를 확인했습니다.';
+        _messageIsError = storageWarning;
       });
     } on DiscoveryCancelledException {
       if (!mounted) return;
@@ -92,6 +146,51 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         });
       }
     }
+  }
+
+  Future<bool?> _showAndroidPermissionRationale() {
+    return showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '로컬 네트워크 권한 안내',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  '현재 Wi-Fi에 연결된 장비를 확인하려면 로컬 네트워크 접근 권한이 필요합니다. '
+                  '검색 결과는 기본적으로 기기 안에서만 처리합니다.',
+                ),
+                const SizedBox(height: 12),
+                const Text('권한을 거부하면 장비 검색 없이 대시보드만 사용할 수 있습니다.'),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(sheetContext).pop(false),
+                      child: const Text('취소'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: () => Navigator.of(sheetContext).pop(true),
+                      child: const Text('권한 요청 계속'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _cancelScan() {
@@ -151,7 +250,10 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                         : '첫 검색이 완료되면 장비와 마지막 확인 시각이 표시됩니다.',
                   )
                 else
-                  _DeviceList(devices: _overview.devices),
+                  _DeviceList(
+                    devices: _overview.devices,
+                    newDeviceIds: _newDeviceIds,
+                  ),
                 const SizedBox(height: 28),
                 const _SectionTitle(
                   title: '보안 경고',
@@ -161,14 +263,25 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                 _overview.findings.isEmpty
                     ? _EmptyPanel(
                         icon: Icons.verified_user_outlined,
-                        title: _hasCompletedScan
-                            ? '보안 분석은 다음 단계에서 연결됩니다.'
+                        title: _securityAnalysisCompleted
+                            ? '현재 규칙에서 추가 확인 항목이 없습니다.'
+                            : _hasCompletedScan
+                            ? '보안 분석을 완료하지 못했습니다.'
                             : '분석된 경고가 없습니다.',
-                        description: _hasCompletedScan
-                            ? '장비 검색은 완료되었지만 위험 규칙은 아직 적용하지 않았습니다.'
+                        description: _securityAnalysisCompleted
+                            ? '현재 탐지 결과가 안전하다는 확정 판정은 아닙니다.'
+                            : _hasCompletedScan
+                            ? '장비 목록은 표시되지만 로컬 기록을 저장하지 못해 분석을 건너뛰었습니다.'
                             : '아직 네트워크를 검색하지 않았으므로 안전 판정 전입니다.',
                       )
                     : _FindingList(findings: _overview.findings),
+                if (_remediationPlans.isNotEmpty) ...[
+                  const SizedBox(height: 28),
+                  _RemediationPanel(
+                    plans: _remediationPlans,
+                    onOpen: _openRemediationPlan,
+                  ),
+                ],
                 if (_lastResult != null) ...[
                   const SizedBox(height: 28),
                   _LimitationsPanel(limitations: _lastResult!.limitations),
@@ -180,6 +293,46 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
           ),
         ),
       ),
+    );
+  }
+
+  Future<void> _openRemediationPlan(RemediationPlan plan) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(plan.title, style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 12),
+                Text(plan.summary),
+                const SizedBox(height: 16),
+                for (final step in plan.steps)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Text('• $step'),
+                  ),
+                const SizedBox(height: 12),
+                const Text(
+                  '현재는 자동 변경을 수행하지 않습니다. 공유기 관리 화면에서 내용을 확인한 뒤 직접 적용하세요.',
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(sheetContext).pop(),
+                    child: const Text('닫기'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -305,6 +458,12 @@ class _MetricGrid extends StatelessWidget {
             ),
             _MetricCard(
               width: itemWidth,
+              label: '신규 장비',
+              value: overview.newDeviceCount.toString(),
+              icon: Icons.fiber_new,
+            ),
+            _MetricCard(
+              width: itemWidth,
               label: '주의 경고',
               value: overview.warningCount.toString(),
               icon: Icons.warning_amber,
@@ -377,9 +536,10 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _DeviceList extends StatelessWidget {
-  const _DeviceList({required this.devices});
+  const _DeviceList({required this.devices, required this.newDeviceIds});
 
   final List<NetworkDevice> devices;
+  final Set<String> newDeviceIds;
 
   @override
   Widget build(BuildContext context) {
@@ -390,7 +550,13 @@ class _DeviceList extends StatelessWidget {
           for (var index = 0; index < devices.length; index++) ...[
             ListTile(
               leading: Icon(_deviceIcon(devices[index].category)),
-              title: Text(devices[index].displayName),
+              title: Row(
+                children: [
+                  Expanded(child: Text(devices[index].displayName)),
+                  if (newDeviceIds.contains(devices[index].id))
+                    const Chip(label: Text('신규')),
+                ],
+              ),
               subtitle: Text(
                 '${devices[index].ipAddresses.join(', ')} · ${_ownershipLabel(devices[index].ownershipStatus)}',
               ),
@@ -415,10 +581,34 @@ class _FindingList extends StatelessWidget {
       children: findings
           .map(
             (finding) => Card(
-              child: ListTile(
-                leading: const Icon(Icons.warning_amber),
-                title: Text(finding.title),
-                subtitle: Text(finding.description),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.warning_amber),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            finding.title,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                        Text(_severityLabel(finding.severity)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(finding.description),
+                    const SizedBox(height: 8),
+                    Text('근거: ${finding.evidence}'),
+                    const SizedBox(height: 8),
+                    Text('탐지 신뢰도: ${(finding.confidence * 100).round()}%'),
+                    const SizedBox(height: 8),
+                    Text('권장 조치: ${finding.recommendedActions.join(' · ')}'),
+                  ],
+                ),
               ),
             ),
           )
@@ -446,6 +636,42 @@ class _LimitationsPanel extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Text('• $limitation'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RemediationPanel extends StatelessWidget {
+  const _RemediationPanel({required this.plans, required this.onOpen});
+
+  final List<RemediationPlan> plans;
+  final ValueChanged<RemediationPlan> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('대응 안내', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 6),
+            const Text('현재 연결된 자동 변경 커넥터가 없어 수동 확인 절차만 제공합니다.'),
+            const SizedBox(height: 12),
+            for (final plan in plans)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: OutlinedButton(
+                    onPressed: () => onOpen(plan),
+                    child: Text(plan.title),
+                  ),
+                ),
               ),
           ],
         ),
@@ -576,6 +802,12 @@ String _ownershipLabel(OwnershipStatus status) => switch (status) {
   OwnershipStatus.confirmed => '확인됨',
   OwnershipStatus.unconfirmed => '소유자 미확인',
   OwnershipStatus.blocked => '차단됨',
+};
+
+String _severityLabel(FindingSeverity severity) => switch (severity) {
+  FindingSeverity.information => '정보',
+  FindingSeverity.warning => '주의',
+  FindingSeverity.critical => '긴급',
 };
 
 IconData _deviceIcon(DeviceCategory category) => switch (category) {

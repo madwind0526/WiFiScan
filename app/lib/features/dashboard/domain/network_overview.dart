@@ -6,16 +6,19 @@ class NetworkOverview {
     required this.devices,
     required this.findings,
     this.lastScannedAt,
+    this.newDeviceCount = 0,
   });
 
   const NetworkOverview.empty()
     : devices = const [],
       findings = const [],
-      lastScannedAt = null;
+      lastScannedAt = null,
+      newDeviceCount = 0;
 
   final List<NetworkDevice> devices;
   final List<SecurityFinding> findings;
   final DateTime? lastScannedAt;
+  final int newDeviceCount;
 
   int get unconfirmedDeviceCount => devices
       .where((device) => device.ownershipStatus == OwnershipStatus.unconfirmed)

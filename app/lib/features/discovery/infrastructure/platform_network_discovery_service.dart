@@ -1,12 +1,16 @@
 import 'dart:io';
 
 import 'package:wifi_scan/features/discovery/application/network_discovery_service.dart';
+import 'package:wifi_scan/features/discovery/infrastructure/android_network_discovery_service.dart';
 import 'package:wifi_scan/features/discovery/domain/discovery_result.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/windows_network_discovery_service.dart';
 
 NetworkDiscoveryService createNetworkDiscoveryService() {
   if (Platform.isWindows) {
     return const WindowsNetworkDiscoveryService();
+  }
+  if (Platform.isAndroid) {
+    return const AndroidNetworkDiscoveryService();
   }
   return const _UnsupportedNetworkDiscoveryService();
 }

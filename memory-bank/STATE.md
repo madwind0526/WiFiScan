@@ -2,10 +2,10 @@
 
 ## Current Wave
 
-- **Wave:** 2
+- **Wave:** 6
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-11 Windows 실제 네트워크/neighbor 환경에서 탐색과 대시보드 연결 검증 완료
+- **Last Checkpoint:** 2026-07-11 Wave 3~6 구현, Android APK/Windows 빌드와 자동 테스트 검증 완료
 
 ## Wave History
 
@@ -14,7 +14,10 @@
 | 0 | 루트 문서, memory-bank, Flutter 기본 앱 | Done |
 | 1 | 제품 범위, 안전 경계, 도메인 모델, 대시보드 | Done |
 | 2 | 현재 네트워크 정보와 비침투 장비 탐색 PoC | Done |
-| 3 | 장비 식별, 스냅샷, 신규 장비 감지 | Pending |
+| 3 | 장비 식별, 스냅샷, 신규 장비 감지 | Done |
+| 4 | 근거 기반 위험 분석과 경고 | Done |
+| 5 | 공유기 커넥터와 승인 기반 방어 조치 | Done |
+| 6 | Android 권한/성능/회귀 검증 흐름 | Done |
 
 ## Session Notes
 
