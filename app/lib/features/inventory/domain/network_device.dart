@@ -13,7 +13,15 @@ enum DeviceCategory {
 
 enum OwnershipStatus { confirmed, unconfirmed, blocked }
 
-enum DiscoverySource { router, subnet, mdns, ssdp, manual }
+enum DiscoverySource {
+  localInterface,
+  router,
+  neighbor,
+  subnet,
+  mdns,
+  ssdp,
+  manual,
+}
 
 class NetworkDevice {
   const NetworkDevice({

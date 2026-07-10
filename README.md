@@ -21,7 +21,8 @@ WifiScan은 사용자가 관리 권한을 가진 네트워크만 점검합니다
 - Flutter Android/Windows 기본 타깃
 - 네트워크 보안 대시보드 골격
 - 장비 인벤토리와 보안 발견사항 도메인 모델
-- 실제 네트워크 탐색 엔진은 다음 Wave에서 구현 예정
+- Windows에서 활성 IPv4 네트워크와 neighbor 장비 탐색 PoC 연결
+- Android 네트워크 탐색은 다음 단계에서 구현 예정
 
 ## 실행
 

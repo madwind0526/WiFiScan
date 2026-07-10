@@ -34,6 +34,12 @@ WifiScan은 사용자가 소유하거나 관리 권한을 가진 로컬 Wi-Fi/LA
 4. **수동 확인**: 사용자가 장비 이름, 유형, 소유 여부를 확인해 식별 정확도를 높인다.
 5. **변화 감지**: 이전 스냅샷과 비교해 신규, 사라짐, 주소 변경, 서비스 변경을 표시한다.
 
+### Wave 2 Windows PoC
+
+현재 PoC는 Windows에서 기본 게이트웨이가 있는 활성 사설 IPv4 인터페이스를 선택한다. 현재 주소가 포함된 네트워크를 최대 `/24`로 제한하고, 호스트별 ICMP 요청 1회로 neighbor cache를 갱신한 다음 `Get-NetNeighbor` 결과를 공통 장비 모델로 변환한다. 로컬 Windows 장비와 기본 게이트웨이도 결과에 포함한다.
+
+이 단계에서는 mDNS/SSDP, 공유기 제조사 API, Android native 탐색을 아직 연결하지 않았다. 장비가 응답하지 않거나 다른 네트워크 세그먼트에 있으면 결과에 나타나지 않을 수 있다.
+
 ## Device Inventory Model
 
 - 내부 장비 ID
@@ -124,7 +130,7 @@ Router / subnet / NSD / mDNS / SSDP observations
 |---|---|---|
 | 0 | 독립 프로젝트 구조와 Flutter 기본 앱 | 완료 |
 | 1 | 제품 범위, 안전 경계, 도메인 모델, 대시보드 | 완료 |
-| 2 | 현재 네트워크 정보와 비침투 장비 탐색 PoC | 예정 |
+| 2 | 현재 네트워크 정보와 비침투 장비 탐색 PoC | 완료 |
 | 3 | 장비 식별, 스냅샷, 신규 장비 감지 | 예정 |
 | 4 | 근거 기반 위험 분석과 경고 | 예정 |
 | 5 | 공유기 커넥터와 승인 기반 방어 조치 | 예정 |
@@ -140,6 +146,7 @@ Router / subnet / NSD / mDNS / SSDP observations
 - 민감한 네트워크 식별자가 로그나 외부 요청에 포함되지 않음
 - 자동 대응 전 미리보기와 명시적 확인
 - `flutter analyze`, `flutter test`, Android/Windows 빌드 통과
+- Windows 실제 네트워크에서 식별자를 로그로 출력하지 않고 탐색 결과 구조만 검증
 
 ## Authoritative References
 

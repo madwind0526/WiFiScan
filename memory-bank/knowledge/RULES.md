@@ -27,3 +27,9 @@
 
 - Android 17/API 37 이상에서 직접 LAN 통신을 사용하면 `ACCESS_LOCAL_NETWORK` 런타임 권한 또는 시스템 중개 탐색 경로를 사용한다.
 - Wi-Fi API 권한은 Android 버전과 실제 호출 API별로 분리하고 거부/철회 상태를 정상 흐름으로 처리한다.
+
+## Active Discovery Limits
+
+- 큰 서브넷은 무제한 탐색하지 않는다.
+- Windows Wave 2 능동 탐색은 현재 주소가 속한 최대 `/24`와 254개 호스트로 제한하고 UI에 범위 제한을 표시한다.
+- 식별자(IP, MAC 등)는 테스트와 로그에 평문으로 출력하지 않는다.

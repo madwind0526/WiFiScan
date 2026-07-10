@@ -61,7 +61,12 @@ app/lib/features/
 
 ## Current Wave
 
-Wave 1의 제품 범위, 안전 경계, 도메인 모델과 대시보드 UI를 완료했다. 다음 Wave는 현재 네트워크 정보와 비침투 장비 탐색 PoC다.
+Wave 2의 Windows 네트워크 탐색 PoC를 완료했다. 다음 Wave는 탐색 결과의 장비 식별, 스냅샷 저장, 신규 장비 감지다.
+
+- 활성 사설 IPv4 인터페이스와 기본 게이트웨이를 선택한다.
+- 현재 주소가 속한 최대 `/24` 범위만 속도 제한된 ICMP 탐색을 수행한다.
+- Windows `Get-NetNeighbor` 결과를 로컬 장비 모델로 정규화한다.
+- Android와 비-Windows 플랫폼은 명시적인 미지원 상태를 반환한다.
 
 ## Memory Bank
 
