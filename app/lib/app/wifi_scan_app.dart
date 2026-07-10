@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:wifi_scan/features/home/presentation/project_home_page.dart';
+import 'package:wifi_scan/features/dashboard/presentation/security_dashboard_page.dart';
 
 class WifiScanApp extends StatelessWidget {
   const WifiScanApp({super.key});
@@ -13,7 +13,7 @@ class WifiScanApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
-      home: const ProjectHomePage(),
+      home: const SecurityDashboardPage(),
     );
   }
 }

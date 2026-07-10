@@ -2,24 +2,30 @@
 
 > **Working directory: `C:\Claude\WifiScan`**
 
-## Project Status
+## Project Overview
 
-WifiScan은 기존 프로젝트와 분리된 새 프로젝트다. 현재는 프로젝트 운영 구조와 실행 가능한 Flutter 기본 앱만 준비되어 있다.
+WifiScan은 사용자가 관리하는 현재 로컬 Wi-Fi/LAN에 연결된 휴대폰, PC, 일반 가전, IoT 장비를 식별하고 잠재적인 보안 위험을 알려주는 로컬 네트워크 보안 도구다.
 
-- 제품 요구사항: 미정
-- 상세 기능: 미정
-- 데이터 모델과 저장 방식: 미정
-- 외부 패키지와 플랫폼 연동 방식: 미정
-- 기존 프로젝트에서는 구조와 작업 절차만 참고한다.
+- 네트워크 장비 인벤토리와 신규/미확인 장비 탐지
+- 비침투 방식의 서비스 노출과 보안 설정 점검
+- 위험 근거, 신뢰도, 권장 대응 표시
+- 공식 관리 경로가 있는 장비에 한정한 승인 기반 대응
+- 스캔 데이터는 기본적으로 로컬에서만 처리
 
-## Initial Scaffold
+## Product Boundary
 
-- Flutter application: `app/`
-- Generated targets: Android, Windows
-- Tests: Flutter widget tests
-- Project context: `docs/`, `memory-bank/`
+- 단말 스캔만으로 모든 장비를 100% 보장할 수 없다.
+- 공유기 DHCP/접속 장비 정보, 로컬 호스트 탐색, mDNS/SSDP 등 여러 관측 소스를 합쳐 탐지 범위를 높인다.
+- 잠든 장비, 방화벽, AP 격리, 별도 VLAN/게스트망은 누락될 수 있으며 UI에 이 한계를 표시한다.
+- 취약점 악용, 비밀번호 대입, 무단 패치, 강제 설정 변경은 범위 밖이다.
 
-생성된 타깃은 초기 골격이며 실제 지원 플랫폼은 요구사항 확정 후 결정한다.
+## Tech Stack
+
+- UI: Flutter
+- Initial targets: Android, Windows
+- Android integration: Kotlin platform code when required
+- State/storage/scanner packages: 구현 Wave에서 검증 후 선택
+- Data: 로컬 우선, 외부 전송 기본 금지
 
 ## Commands
 
@@ -32,18 +38,30 @@ flutter run -d windows
 flutter run
 ```
 
-## Source Layout
+## Architecture
 
 ```text
-app/lib/
-├─ app/                  App shell
-├─ features/             Product features added from WifiScan requirements
-└─ main.dart             Application entry point
+Discovery sources
+  -> normalized device observations
+  -> identity correlation and device inventory
+  -> non-invasive security checks
+  -> findings with evidence and confidence
+  -> warning and guided remediation
+  -> approved connector action when safely supported
 ```
 
-## Next Step
+```text
+app/lib/features/
+├─ dashboard/            Network status overview
+├─ inventory/            Devices and observations
+├─ discovery/            Router, subnet, and service discovery adapters
+├─ security/             Findings, evidence, and risk policy
+└─ remediation/          Guidance and approved management connectors
+```
 
-`docs/DESIGN.md`의 질문에 답하며 WifiScan 자체의 목적, 사용자 흐름, 지원 플랫폼, 데이터 처리 방식을 확정한다.
+## Current Wave
+
+Wave 1의 제품 범위, 안전 경계, 도메인 모델과 대시보드 UI를 완료했다. 다음 Wave는 현재 네트워크 정보와 비침투 장비 탐색 PoC다.
 
 ## Memory Bank
 
