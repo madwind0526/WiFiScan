@@ -12,12 +12,11 @@ void main() {
   testWidgets('shows the network security dashboard', (tester) async {
     await tester.pumpWidget(const WifiScanApp());
 
-    expect(find.text('와이파이 보안 점검'), findsOneWidget);
-    expect(find.text('탐지된 장비'), findsOneWidget);
-    expect(find.text('미확인 장비'), findsOneWidget);
-    expect(find.text('현재 네트워크 검색 시작'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('보안 경고'), 300);
-    expect(find.text('보안 경고'), findsOneWidget);
+    expect(find.text('와이파이 보안'), findsOneWidget);
+    expect(find.byTooltip('탐지된 장비'), findsOneWidget);
+    expect(find.byTooltip('미확인 장비'), findsOneWidget);
+    expect(find.byTooltip('현재 네트워크 검색 시작'), findsNWidgets(2));
+    expect(find.text('경고'), findsOneWidget);
   });
 
   testWidgets('shows discovered devices after a completed scan', (
@@ -30,11 +29,12 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('현재 네트워크 검색 시작'));
+    await tester.tap(find.byTooltip('현재 네트워크 검색 시작').first);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('검색이 완료되었습니다.'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('이 Windows 컴퓨터'), 300);
+    await tester.tap(find.text('장비'));
+    await tester.pumpAndSettle();
     expect(find.text('이 Windows 컴퓨터'), findsOneWidget);
     expect(find.text('기본 게이트웨이'), findsOneWidget);
   });
@@ -44,14 +44,14 @@ void main() {
       const WifiScanApp(discoveryService: _SlowDiscoveryService()),
     );
 
-    await tester.tap(find.text('현재 네트워크 검색 시작'));
+    await tester.tap(find.byTooltip('현재 네트워크 검색 시작').first);
     await tester.pump();
-    expect(find.text('검색 중지 요청'), findsOneWidget);
+    expect(find.byTooltip('검색 중지 요청'), findsNWidgets(2));
 
-    await tester.tap(find.text('검색 중지 요청'));
+    await tester.tap(find.byTooltip('검색 중지 요청').first);
     await tester.pump(const Duration(milliseconds: 20));
     expect(find.text('검색을 중지했습니다.'), findsOneWidget);
-    expect(find.text('현재 네트워크 검색 시작'), findsOneWidget);
+    expect(find.byTooltip('현재 네트워크 검색 시작'), findsNWidgets(2));
   });
 
   testWidgets('supports a small screen without layout exceptions', (
@@ -68,8 +68,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    await tester.scrollUntilVisible(find.text('현재 네트워크 검색 시작'), 200);
-    expect(find.text('현재 네트워크 검색 시작'), findsOneWidget);
+    expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

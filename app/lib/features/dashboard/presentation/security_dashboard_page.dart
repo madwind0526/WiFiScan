@@ -13,6 +13,8 @@ import 'package:wifi_scan/features/security/application/security_risk_analyzer.d
 import 'package:wifi_scan/features/remediation/application/remediation_planner.dart';
 import 'package:wifi_scan/features/remediation/domain/remediation_plan.dart';
 
+enum _DashboardSection { overview, devices, findings }
+
 class SecurityDashboardPage extends StatefulWidget {
   const SecurityDashboardPage({
     super.key,
@@ -44,6 +46,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   bool _securityAnalysisCompleted = false;
   Set<String> _newDeviceIds = const {};
   List<RemediationPlan> _remediationPlans = const [];
+  _DashboardSection _section = _DashboardSection.overview;
 
   @override
   void initState() {
@@ -210,86 +213,245 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('와이파이 보안 점검')),
+      appBar: AppBar(
+        titleSpacing: 16,
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.wifi,
+              size: 19,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: 8),
+            const Text('와이파이 보안', style: TextStyle(fontSize: 15)),
+          ],
+        ),
+        actions: [
+          Tooltip(
+            message: _isScanning ? '검색 중지 요청' : '현재 네트워크 검색 시작',
+            child: IconButton(
+              onPressed: _isScanning ? _cancelScan : _startScan,
+              icon: Icon(
+                _isScanning ? Icons.stop_circle_outlined : Icons.radar,
+              ),
+            ),
+          ),
+          Tooltip(
+            message: '설정 및 안전 원칙',
+            child: IconButton(
+              onPressed: _showSettingsSheet,
+              icon: const Icon(Icons.settings_outlined),
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 960),
             child: ListView(
               padding: const EdgeInsets.all(20),
-              children: [
-                _StatusHeader(
-                  lastScannedAt: _overview.lastScannedAt,
-                  networkContext: _lastResult?.context,
-                ),
-                const SizedBox(height: 16),
-                _MetricGrid(overview: _overview),
-                const SizedBox(height: 24),
-                _ScanControls(
-                  isScanning: _isScanning,
-                  progress: _progress,
-                  onScan: _startScan,
-                  onCancel: _cancelScan,
-                ),
-                if (_message != null) ...[
-                  const SizedBox(height: 12),
-                  _MessagePanel(message: _message!, isError: _messageIsError),
-                ],
-                const SizedBox(height: 28),
-                const _SectionTitle(
-                  title: '연결 장비',
-                  description: '휴대폰, 컴퓨터, 가전, IoT 장비를 한곳에서 확인합니다.',
-                ),
-                const SizedBox(height: 12),
-                if (_overview.devices.isEmpty)
-                  _EmptyPanel(
-                    icon: Icons.devices_other,
-                    title: '확인된 장비가 없습니다.',
-                    description: _hasCompletedScan
-                        ? '이번 검색에서 관측 가능한 장비가 없었습니다.'
-                        : '첫 검색이 완료되면 장비와 마지막 확인 시각이 표시됩니다.',
-                  )
-                else
-                  _DeviceList(
-                    devices: _overview.devices,
-                    newDeviceIds: _newDeviceIds,
-                  ),
-                const SizedBox(height: 28),
-                const _SectionTitle(
-                  title: '보안 경고',
-                  description: '발견 근거와 신뢰도를 확인한 뒤 안전한 대응을 선택합니다.',
-                ),
-                const SizedBox(height: 12),
-                _overview.findings.isEmpty
-                    ? _EmptyPanel(
-                        icon: Icons.verified_user_outlined,
-                        title: _securityAnalysisCompleted
-                            ? '현재 규칙에서 추가 확인 항목이 없습니다.'
-                            : _hasCompletedScan
-                            ? '보안 분석을 완료하지 못했습니다.'
-                            : '분석된 경고가 없습니다.',
-                        description: _securityAnalysisCompleted
-                            ? '현재 탐지 결과가 안전하다는 확정 판정은 아닙니다.'
-                            : _hasCompletedScan
-                            ? '장비 목록은 표시되지만 로컬 기록을 저장하지 못해 분석을 건너뛰었습니다.'
-                            : '아직 네트워크를 검색하지 않았으므로 안전 판정 전입니다.',
-                      )
-                    : _FindingList(findings: _overview.findings),
-                if (_remediationPlans.isNotEmpty) ...[
-                  const SizedBox(height: 28),
-                  _RemediationPanel(
-                    plans: _remediationPlans,
-                    onOpen: _openRemediationPlan,
-                  ),
-                ],
-                if (_lastResult != null) ...[
-                  const SizedBox(height: 28),
-                  _LimitationsPanel(limitations: _lastResult!.limitations),
-                ],
-                const SizedBox(height: 28),
-                const _SafetyNotice(),
-              ],
+              children: _sectionChildren(context),
             ),
+          ),
+        ),
+      ),
+      bottomNavigationBar: _buildBottomNavigation(context),
+    );
+  }
+
+  List<Widget> _sectionChildren(BuildContext context) {
+    return switch (_section) {
+      _DashboardSection.overview => _overviewChildren(context),
+      _DashboardSection.devices => _devicesChildren(context),
+      _DashboardSection.findings => _findingsChildren(context),
+    };
+  }
+
+  List<Widget> _overviewChildren(BuildContext context) {
+    return [
+      _StatusHeader(
+        lastScannedAt: _overview.lastScannedAt,
+        networkContext: _lastResult?.context,
+      ),
+      const SizedBox(height: 16),
+      _MetricGrid(overview: _overview),
+      const SizedBox(height: 20),
+      _ScanControls(
+        isScanning: _isScanning,
+        progress: _progress,
+        onScan: _startScan,
+        onCancel: _cancelScan,
+      ),
+      if (_message != null) ...[
+        const SizedBox(height: 12),
+        _MessagePanel(message: _message!, isError: _messageIsError),
+      ],
+      const SizedBox(height: 20),
+      _QuickSectionTile(
+        icon: Icons.devices_other,
+        title: '연결 장비',
+        subtitle: '${_overview.devices.length}개 탐지됨',
+        onTap: () => setState(() => _section = _DashboardSection.devices),
+      ),
+      const SizedBox(height: 10),
+      _QuickSectionTile(
+        icon: _overview.findings.isEmpty
+            ? Icons.verified_user_outlined
+            : Icons.warning_amber,
+        title: '보안 경고',
+        subtitle: _overview.findings.isEmpty
+            ? '확인할 경고 없음'
+            : '${_overview.findings.length}개 확인 필요',
+        onTap: () => setState(() => _section = _DashboardSection.findings),
+      ),
+      const SizedBox(height: 20),
+      const _SafetyNotice(),
+    ];
+  }
+
+  List<Widget> _devicesChildren(BuildContext context) {
+    return [
+      const _SectionTitle(
+        icon: Icons.devices_other,
+        title: '연결 장비',
+        description: '휴대폰, 컴퓨터, 가전, IoT 장비를 한곳에서 확인합니다.',
+      ),
+      const SizedBox(height: 12),
+      _ScanControls(
+        isScanning: _isScanning,
+        progress: _progress,
+        onScan: _startScan,
+        onCancel: _cancelScan,
+      ),
+      if (_message != null) ...[
+        const SizedBox(height: 12),
+        _MessagePanel(message: _message!, isError: _messageIsError),
+      ],
+      const SizedBox(height: 16),
+      if (_overview.devices.isEmpty)
+        _EmptyPanel(
+          icon: Icons.devices_other,
+          title: '탐지된 장비가 없습니다.',
+          description: _hasCompletedScan
+              ? '이번 검색에서 관측 가능한 장비가 없었습니다.'
+              : '검색 아이콘을 눌러 장비를 확인하세요.',
+        )
+      else
+        _DeviceList(devices: _overview.devices, newDeviceIds: _newDeviceIds),
+      if (_lastResult != null) ...[
+        const SizedBox(height: 20),
+        _LimitationsPanel(limitations: _lastResult!.limitations),
+      ],
+    ];
+  }
+
+  List<Widget> _findingsChildren(BuildContext context) {
+    return [
+      const _SectionTitle(
+        icon: Icons.shield_outlined,
+        title: '보안 경고',
+        description: '발견 근거와 신뢰도를 확인한 뒤 안전한 대응을 선택합니다.',
+      ),
+      const SizedBox(height: 16),
+      if (_overview.findings.isEmpty)
+        _EmptyPanel(
+          icon: Icons.verified_user_outlined,
+          title: _securityAnalysisCompleted
+              ? '현재 규칙에서 추가 확인 항목이 없습니다.'
+              : _hasCompletedScan
+              ? '보안 분석을 완료하지 못했습니다.'
+              : '분석된 경고가 없습니다.',
+          description: _securityAnalysisCompleted
+              ? '현재 탐지 결과가 안전하다는 확정 판정은 아닙니다.'
+              : _hasCompletedScan
+              ? '장비 목록은 표시되지만 로컬 기록을 저장하지 못해 분석을 건너뛰었습니다.'
+              : '먼저 네트워크 검색을 실행하세요.',
+        )
+      else
+        _FindingList(findings: _overview.findings),
+      if (_remediationPlans.isNotEmpty) ...[
+        const SizedBox(height: 20),
+        _RemediationPanel(
+          plans: _remediationPlans,
+          onOpen: _openRemediationPlan,
+        ),
+      ],
+      const SizedBox(height: 20),
+      const _SafetyNotice(),
+    ];
+  }
+
+  Widget _buildBottomNavigation(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return NavigationBarTheme(
+      data: NavigationBarThemeData(
+        height: 62,
+        indicatorColor: Colors.transparent,
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(
+            color: states.contains(WidgetState.selected)
+                ? scheme.primary
+                : scheme.onSurfaceVariant,
+            size: 21,
+          ),
+        ),
+        labelTextStyle: WidgetStatePropertyAll(
+          TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+      child: NavigationBar(
+        selectedIndex: _section.index,
+        onDestinationSelected: (index) {
+          setState(() => _section = _DashboardSection.values[index]);
+        },
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.home_outlined), label: '홈'),
+          NavigationDestination(icon: Icon(Icons.devices_other), label: '장비'),
+          NavigationDestination(icon: Icon(Icons.shield_outlined), label: '경고'),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showSettingsSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('설정 및 안전 원칙', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 16),
+              const ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.lock_outline),
+                title: Text('로컬 우선 처리'),
+                subtitle: Text('스캔 결과는 기본적으로 기기 안에서만 처리합니다.'),
+              ),
+              const ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.policy_outlined),
+                title: Text('비침투 점검'),
+                subtitle: Text('비밀번호 대입, 취약점 악용, 무단 설정 변경을 수행하지 않습니다.'),
+              ),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.of(sheetContext).pop(),
+                  child: const Text('닫기'),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -405,22 +567,27 @@ class _ScanControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final progressValue = progress?.fraction;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Row(
       children: [
-        FilledButton.icon(
-          onPressed: isScanning ? onCancel : onScan,
-          icon: Icon(isScanning ? Icons.stop_circle_outlined : Icons.radar),
-          label: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Text(isScanning ? '검색 중지 요청' : '현재 네트워크 검색 시작'),
+        Tooltip(
+          message: isScanning ? '검색 중지 요청' : '현재 네트워크 검색 시작',
+          child: IconButton.filled(
+            onPressed: isScanning ? onCancel : onScan,
+            icon: Icon(isScanning ? Icons.stop_circle_outlined : Icons.radar),
           ),
         ),
         if (isScanning) ...[
-          const SizedBox(height: 12),
-          LinearProgressIndicator(value: progressValue),
-          const SizedBox(height: 8),
-          Text(_progressLabel(progress)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                LinearProgressIndicator(value: progressValue),
+                const SizedBox(height: 6),
+                Text(_progressLabel(progress)),
+              ],
+            ),
+          ),
         ],
       ],
     );
@@ -496,19 +663,23 @@ class _MetricCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: width,
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Icon(icon, color: Theme.of(context).colorScheme.primary),
-              const SizedBox(width: 12),
-              Expanded(child: Text(label)),
-              const SizedBox(width: 12),
-              Text(value, style: Theme.of(context).textTheme.headlineSmall),
-            ],
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        label: '$label $value',
+        child: SizedBox(
+          width: width,
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Icon(icon, color: Theme.of(context).colorScheme.primary),
+                  Text(value, style: Theme.of(context).textTheme.headlineSmall),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -517,20 +688,64 @@ class _MetricCard extends StatelessWidget {
 }
 
 class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({required this.title, required this.description});
+  const _SectionTitle({
+    required this.icon,
+    required this.title,
+    required this.description,
+  });
 
+  final IconData icon;
   final String title;
   final String description;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Text(title, style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 4),
-        Text(description),
+        Icon(icon, color: Theme.of(context).colorScheme.primary),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+        ),
+        Tooltip(
+          message: description,
+          child: const Icon(Icons.info_outline, size: 18),
+        ),
       ],
+    );
+  }
+}
+
+class _QuickSectionTile extends StatelessWidget {
+  const _QuickSectionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        dense: true,
+        leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
+        title: Text(title),
+        subtitle: Text(subtitle),
+        trailing: Tooltip(
+          message: '$title 열기',
+          child: IconButton(
+            onPressed: onTap,
+            icon: const Icon(Icons.chevron_right),
+          ),
+        ),
+        onTap: onTap,
+      ),
     );
   }
 }

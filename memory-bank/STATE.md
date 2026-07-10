@@ -5,7 +5,7 @@
 - **Wave:** 6
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-11 Wave 3~6 구현, Android APK/Windows 빌드와 자동 테스트 검증 완료
+- **Last Checkpoint:** 2026-07-11 Wave 3~6 구현, 아이콘 중심 UI, Android APK/Windows 빌드와 자동 테스트 검증 완료
 
 ## Wave History
 
