@@ -35,6 +35,12 @@ void main() {
     expect(find.textContaining('검색이 완료되었습니다.'), findsOneWidget);
     await tester.tap(find.text('장비'));
     await tester.pumpAndSettle();
+    expect(find.text('네트워크 맵'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('이 Windows 컴퓨터'),
+      320,
+      scrollable: find.byType(Scrollable),
+    );
     expect(find.text('이 Windows 컴퓨터'), findsOneWidget);
     expect(find.text('기본 게이트웨이'), findsOneWidget);
   });

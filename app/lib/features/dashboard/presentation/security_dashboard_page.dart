@@ -1,4 +1,5 @@
 import 'dart:io' as io;
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:wifi_scan/features/dashboard/domain/network_overview.dart';
@@ -339,8 +340,15 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
               ? '이번 검색에서 관측 가능한 장비가 없었습니다.'
               : '검색 아이콘을 눌러 장비를 확인하세요.',
         )
-      else
+      else ...[
+        _NetworkTopologyCard(
+          devices: _overview.devices,
+          newDeviceIds: _newDeviceIds,
+          onDeviceTap: _showDeviceDetails,
+        ),
+        const SizedBox(height: 16),
         _DeviceList(devices: _overview.devices, newDeviceIds: _newDeviceIds),
+      ],
       if (_lastResult != null) ...[
         const SizedBox(height: 20),
         _LimitationsPanel(limitations: _lastResult!.limitations),
@@ -483,6 +491,56 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                   '현재는 자동 변경을 수행하지 않습니다. 공유기 관리 화면에서 내용을 확인한 뒤 직접 적용하세요.',
                 ),
                 const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(sheetContext).pop(),
+                    child: const Text('닫기'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showDeviceDetails(NetworkDevice device) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(_deviceIcon(device.category), size: 28),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        device.displayName,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _DetailRow(label: '유형', value: _categoryLabel(device.category)),
+                _DetailRow(
+                  label: '소유 상태',
+                  value: _ownershipLabel(device.ownershipStatus),
+                ),
+                _DetailRow(label: '주소', value: device.ipAddresses.join(', ')),
+                _DetailRow(
+                  label: '식별 신뢰도',
+                  value: '${(device.identityConfidence * 100).round()}%',
+                ),
+                const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton(
@@ -747,6 +805,254 @@ class _QuickSectionTile extends StatelessWidget {
         onTap: onTap,
       ),
     );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 84, child: Text(label)),
+          Expanded(child: Text(value)),
+        ],
+      ),
+    );
+  }
+}
+
+class _NetworkTopologyCard extends StatelessWidget {
+  const _NetworkTopologyCard({
+    required this.devices,
+    required this.newDeviceIds,
+    required this.onDeviceTap,
+  });
+
+  final List<NetworkDevice> devices;
+  final Set<String> newDeviceIds;
+  final ValueChanged<NetworkDevice> onDeviceTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        height: 430,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final height = constraints.maxHeight;
+            final center = Offset(width / 2, height / 2 + 12);
+            final local = devices.cast<NetworkDevice?>().firstWhere(
+              (device) =>
+                  device!.sources.contains(DiscoverySource.localInterface),
+              orElse: () => null,
+            );
+            final gateway = devices.cast<NetworkDevice?>().firstWhere(
+              (device) => device!.category == DeviceCategory.router,
+              orElse: () => null,
+            );
+            final others = devices
+                .where((device) => device != local && device != gateway)
+                .toList(growable: false);
+            final positions = <String, Offset>{};
+            if (local != null) positions[local.id] = center;
+            if (gateway != null) {
+              positions[gateway.id] = Offset(width / 2, 76);
+            }
+            final radius = (width < height ? width : height) * 0.34;
+            for (var index = 0; index < others.length; index++) {
+              final angle =
+                  -math.pi / 2 +
+                  (math.pi * 2 * index / math.max(others.length, 1));
+              positions[others[index].id] = Offset(
+                center.dx + math.cos(angle) * radius,
+                center.dy + math.sin(angle) * radius,
+              );
+            }
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: InteractiveViewer(
+                    boundaryMargin: const EdgeInsets.all(80),
+                    minScale: 0.8,
+                    maxScale: 2.5,
+                    child: SizedBox(
+                      width: width,
+                      height: height,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: CustomPaint(
+                              painter: _NetworkTopologyPainter(
+                                devices: devices,
+                                positions: positions,
+                                centerId: local?.id,
+                                scheme: Theme.of(context).colorScheme,
+                              ),
+                            ),
+                          ),
+                          for (final device in devices)
+                            if (positions[device.id] != null)
+                              Positioned(
+                                left: positions[device.id]!.dx - 34,
+                                top: positions[device.id]!.dy - 34,
+                                child: _TopologyNode(
+                                  device: device,
+                                  isNew: newDeviceIds.contains(device.id),
+                                  onTap: () => onDeviceTap(device),
+                                ),
+                              ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 14,
+                  top: 12,
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.account_tree_outlined,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('네트워크 맵'),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  right: 10,
+                  top: 8,
+                  child: Tooltip(
+                    message: '마우스 휠 또는 두 손가락으로 확대/축소',
+                    child: IconButton(
+                      onPressed: null,
+                      icon: const Icon(Icons.zoom_out_map, size: 18),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 14,
+                  bottom: 12,
+                  child: Text(
+                    '노드를 눌러 장비 상세 정보 확인',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _TopologyNode extends StatelessWidget {
+  const _TopologyNode({
+    required this.device,
+    required this.isNew,
+    required this.onTap,
+  });
+
+  final NetworkDevice device;
+  final bool isNew;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = device.sources.contains(DiscoverySource.localInterface)
+        ? Theme.of(context).colorScheme.primary
+        : device.category == DeviceCategory.router
+        ? Colors.orange
+        : Theme.of(context).colorScheme.secondary;
+    return Tooltip(
+      message: '${device.displayName}\n${device.ipAddresses.join(', ')}',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(36),
+        child: SizedBox(
+          width: 68,
+          height: 68,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: color.withValues(alpha: 0.16),
+                  border: Border.all(color: color, width: 2),
+                ),
+                child: SizedBox.square(
+                  dimension: 52,
+                  child: Icon(_deviceIcon(device.category), color: color),
+                ),
+              ),
+              if (isNew)
+                Positioned(
+                  right: 2,
+                  top: 2,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.error,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const SizedBox.square(dimension: 10),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NetworkTopologyPainter extends CustomPainter {
+  const _NetworkTopologyPainter({
+    required this.devices,
+    required this.positions,
+    required this.centerId,
+    required this.scheme,
+  });
+
+  final List<NetworkDevice> devices;
+  final Map<String, Offset> positions;
+  final String? centerId;
+  final ColorScheme scheme;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = centerId == null ? null : positions[centerId];
+    if (center == null) return;
+    final line = Paint()
+      ..color = scheme.outlineVariant.withValues(alpha: 0.7)
+      ..strokeWidth = 1.5;
+    for (final device in devices) {
+      if (device.id == centerId) continue;
+      final position = positions[device.id];
+      if (position != null) canvas.drawLine(center, position, line);
+    }
+    final centerGlow = Paint()
+      ..color = scheme.primary.withValues(alpha: 0.10)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(center, 48, centerGlow);
+  }
+
+  @override
+  bool shouldRepaint(covariant _NetworkTopologyPainter oldDelegate) {
+    return oldDelegate.devices != devices || oldDelegate.positions != positions;
   }
 }
 
