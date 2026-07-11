@@ -16,17 +16,21 @@ import 'package:wifi_scan/features/remediation/domain/remediation_plan.dart';
 
 enum _DashboardSection { overview, devices, findings }
 
+enum _DashboardView { mesh, cards, list }
+
 class SecurityDashboardPage extends StatefulWidget {
   const SecurityDashboardPage({
     super.key,
     this.discoveryService,
     this.inventoryRepository,
     this.securityRiskAnalyzer,
+    this.onThemeModeChanged,
   });
 
   final NetworkDiscoveryService? discoveryService;
   final InventoryRepository? inventoryRepository;
   final SecurityRiskAnalyzer? securityRiskAnalyzer;
+  final ValueChanged<ThemeMode>? onThemeModeChanged;
 
   @override
   State<SecurityDashboardPage> createState() => _SecurityDashboardPageState();
@@ -48,6 +52,9 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   Set<String> _newDeviceIds = const {};
   List<RemediationPlan> _remediationPlans = const [];
   _DashboardSection _section = _DashboardSection.overview;
+  _DashboardView _view = _DashboardView.mesh;
+  String _searchQuery = '';
+  ThemeMode _themeMode = ThemeMode.system;
 
   @override
   void initState() {
@@ -214,146 +221,160 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 16,
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.wifi,
-              size: 19,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(width: 8),
-            const Text('와이파이 보안', style: TextStyle(fontSize: 15)),
-          ],
-        ),
-        actions: [
-          Tooltip(
-            message: _isScanning ? '검색 중지 요청' : '현재 네트워크 검색 시작',
-            child: IconButton(
-              onPressed: _isScanning ? _cancelScan : _startScan,
-              icon: Icon(
-                _isScanning ? Icons.stop_circle_outlined : Icons.radar,
-              ),
-            ),
-          ),
-          Tooltip(
-            message: '설정 및 안전 원칙',
-            child: IconButton(
-              onPressed: _showSettingsSheet,
-              icon: const Icon(Icons.settings_outlined),
-            ),
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 960),
-            child: ListView(
-              padding: const EdgeInsets.all(20),
-              children: _sectionChildren(context),
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: Column(
+              children: [
+                _TopControlBar(
+                  query: _searchQuery,
+                  view: _view,
+                  onQueryChanged: (value) =>
+                      setState(() => _searchQuery = value.trim()),
+                  onViewChanged: (view) => setState(() {
+                    _view = view;
+                    _section = _DashboardSection.devices;
+                  }),
+                  onSettings: _showSettingsSheet,
+                ),
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 112),
+                    children: _mainChildren(context),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
       ),
       bottomNavigationBar: _buildBottomNavigation(context),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _isScanning ? _cancelScan : _startScan,
+        icon: Icon(_isScanning ? Icons.stop_rounded : Icons.radar),
+        label: Text(_isScanning ? '중지' : '스캔'),
+        tooltip: _isScanning ? '검색 중지 요청' : '현재 네트워크 검색 시작',
+      ),
     );
   }
 
-  List<Widget> _sectionChildren(BuildContext context) {
+  List<Widget> _mainChildren(BuildContext context) {
     return switch (_section) {
-      _DashboardSection.overview => _overviewChildren(context),
-      _DashboardSection.devices => _devicesChildren(context),
+      _DashboardSection.overview => _homeMainChildren(context),
+      _DashboardSection.devices => _deviceMainChildren(context),
       _DashboardSection.findings => _findingsChildren(context),
     };
   }
 
-  List<Widget> _overviewChildren(BuildContext context) {
+  List<Widget> _homeMainChildren(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return [
-      _StatusHeader(
-        lastScannedAt: _overview.lastScannedAt,
-        networkContext: _lastResult?.context,
+      const SizedBox(height: 8),
+      Text('내 네트워크', style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 4),
+      Text(
+        _lastResult?.context.scannedSubnet ?? '스캔을 시작하면 연결된 장비가 표시됩니다.',
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
       ),
-      const SizedBox(height: 16),
-      _MetricGrid(overview: _overview),
-      const SizedBox(height: 20),
-      _ScanControls(
+      const SizedBox(height: 18),
+      _SummaryPanel(
+        deviceCount: _overview.devices.length,
+        warningCount: _overview.findings.length,
         isScanning: _isScanning,
-        progress: _progress,
-        onScan: _startScan,
-        onCancel: _cancelScan,
+        message: _message,
       ),
       if (_message != null) ...[
         const SizedBox(height: 12),
         _MessagePanel(message: _message!, isError: _messageIsError),
       ],
-      const SizedBox(height: 20),
-      _QuickSectionTile(
-        icon: Icons.devices_other,
-        title: '연결 장비',
-        subtitle: '${_overview.devices.length}개 탐지됨',
-        onTap: () => setState(() => _section = _DashboardSection.devices),
-      ),
-      const SizedBox(height: 10),
-      _QuickSectionTile(
-        icon: _overview.findings.isEmpty
-            ? Icons.verified_user_outlined
-            : Icons.warning_amber,
-        title: '보안 경고',
-        subtitle: _overview.findings.isEmpty
-            ? '확인할 경고 없음'
-            : '${_overview.findings.length}개 확인 필요',
-        onTap: () => setState(() => _section = _DashboardSection.findings),
-      ),
-      const SizedBox(height: 20),
-      const _SafetyNotice(),
+      if (_progress != null) ...[
+        const SizedBox(height: 10),
+        Text(
+          _progressLabel(_progress),
+          style: Theme.of(context).textTheme.labelMedium,
+          textAlign: TextAlign.center,
+        ),
+      ],
+      const SizedBox(height: 16),
+      if (_overview.devices.isNotEmpty)
+        _MeshNetworkView(
+          devices: _filteredDevices,
+          newDeviceIds: _newDeviceIds,
+          onDeviceTap: _showDeviceDetails,
+        )
+      else
+        _EmptyPanel(
+          icon: Icons.radar,
+          title: '아직 스캔 결과가 없습니다.',
+          description: '하단의 스캔 버튼을 눌러 현재 Wi-Fi 장비를 확인하세요.',
+        ),
+      const SizedBox(height: 16),
+      _NetworkContextCard(context: _lastResult?.context),
     ];
   }
 
-  List<Widget> _devicesChildren(BuildContext context) {
-    return [
-      const _SectionTitle(
-        icon: Icons.devices_other,
-        title: '연결 장비',
-        description: '휴대폰, 컴퓨터, 가전, IoT 장비를 한곳에서 확인합니다.',
-      ),
-      const SizedBox(height: 12),
-      _ScanControls(
-        isScanning: _isScanning,
-        progress: _progress,
-        onScan: _startScan,
-        onCancel: _cancelScan,
-      ),
-      if (_message != null) ...[
-        const SizedBox(height: 12),
-        _MessagePanel(message: _message!, isError: _messageIsError),
-      ],
-      const SizedBox(height: 16),
-      if (_overview.devices.isEmpty)
+  List<Widget> _deviceMainChildren(BuildContext context) {
+    final devices = _filteredDevices;
+    if (devices.isEmpty) {
+      return [
+        const SizedBox(height: 8),
         _EmptyPanel(
           icon: Icons.devices_other,
-          title: '탐지된 장비가 없습니다.',
-          description: _hasCompletedScan
-              ? '이번 검색에서 관측 가능한 장비가 없었습니다.'
-              : '검색 아이콘을 눌러 장비를 확인하세요.',
-        )
-      else ...[
-        _NetworkTopologyCard(
-          devices: _overview.devices,
+          title: _overview.devices.isEmpty ? '연결된 장비가 없습니다.' : '검색 결과가 없습니다.',
+          description: _overview.devices.isEmpty
+              ? '하단의 스캔 버튼으로 장비를 확인하세요.'
+              : '검색어를 바꾸거나 지워 보세요.',
+        ),
+      ];
+    }
+    return [
+      const SizedBox(height: 8),
+      _DeviceCountHeader(count: devices.length, query: _searchQuery),
+      const SizedBox(height: 12),
+      switch (_view) {
+        _DashboardView.mesh => _MeshNetworkView(
+          devices: devices,
           newDeviceIds: _newDeviceIds,
           onDeviceTap: _showDeviceDetails,
         ),
-        const SizedBox(height: 16),
-        _DeviceList(devices: _overview.devices, newDeviceIds: _newDeviceIds),
-      ],
+        _DashboardView.cards => _DeviceCardGrid(
+          devices: devices,
+          newDeviceIds: _newDeviceIds,
+          onDeviceTap: _showDeviceDetails,
+        ),
+        _DashboardView.list => _DeviceList(
+          devices: devices,
+          newDeviceIds: _newDeviceIds,
+          onDeviceTap: _showDeviceDetails,
+        ),
+      },
       if (_lastResult != null) ...[
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
+        _NetworkContextCard(context: _lastResult!.context),
+        const SizedBox(height: 12),
         _LimitationsPanel(limitations: _lastResult!.limitations),
       ],
     ];
+  }
+
+  List<NetworkDevice> get _filteredDevices {
+    final query = _searchQuery.toLowerCase();
+    if (query.isEmpty) return _overview.devices;
+    return _overview.devices
+        .where((device) {
+          final fields = [
+            device.displayName,
+            device.vendor ?? '',
+            device.macAddress ?? '',
+            ...device.ipAddresses,
+          ];
+          return fields.any((field) => field.toLowerCase().contains(query));
+        })
+        .toList(growable: false);
   }
 
   List<Widget> _findingsChildren(BuildContext context) {
@@ -438,8 +459,25 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('설정 및 안전 원칙', style: Theme.of(context).textTheme.titleLarge),
+              Text('설정', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 16),
+              Text('화면', style: Theme.of(context).textTheme.labelLarge),
+              const SizedBox(height: 10),
+              SegmentedButton<ThemeMode>(
+                segments: const [
+                  ButtonSegment(value: ThemeMode.system, label: Text('시스템')),
+                  ButtonSegment(value: ThemeMode.light, label: Text('라이트')),
+                  ButtonSegment(value: ThemeMode.dark, label: Text('다크')),
+                ],
+                selected: {_themeMode},
+                onSelectionChanged: (selection) {
+                  final value = selection.first;
+                  setState(() => _themeMode = value);
+                  widget.onThemeModeChanged?.call(value);
+                },
+                showSelectedIcon: false,
+              ),
+              const Divider(height: 24),
               const ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(Icons.lock_outline),
@@ -507,240 +545,107 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   }
 
   Future<void> _showDeviceDetails(NetworkDevice device) async {
-    await showModalBottomSheet<void>(
+    await showDialog<void>(
       context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(_deviceIcon(device.category), size: 28),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        device.displayName,
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                _DetailRow(label: '유형', value: _categoryLabel(device.category)),
-                _DetailRow(
-                  label: '소유 상태',
-                  value: _ownershipLabel(device.ownershipStatus),
-                ),
-                _DetailRow(label: '주소', value: device.ipAddresses.join(', ')),
-                _DetailRow(
-                  label: '식별 신뢰도',
-                  value: '${(device.identityConfidence * 100).round()}%',
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: () => Navigator.of(sheetContext).pop(),
-                    child: const Text('닫기'),
-                  ),
-                ),
-              ],
-            ),
+      barrierColor: Colors.black54,
+      builder: (dialogContext) {
+        final media = MediaQuery.of(dialogContext);
+        final maxHeight = (media.size.height - media.viewInsets.bottom - 48)
+            .clamp(300.0, 620.0)
+            .toDouble();
+        return Dialog(
+          backgroundColor: Theme.of(
+            context,
+          ).colorScheme.surface.withValues(alpha: 0.94),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
           ),
-        );
-      },
-    );
-  }
-}
-
-class _StatusHeader extends StatelessWidget {
-  const _StatusHeader({required this.lastScannedAt, this.networkContext});
-
-  final DateTime? lastScannedAt;
-  final NetworkContext? networkContext;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasScan = lastScannedAt != null;
-    final contextInfo = networkContext;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              Icons.shield_outlined,
-              size: 40,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(width: 16),
-            Expanded(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: 520, maxHeight: maxHeight),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(22),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    hasScan ? '네트워크 검색을 완료했습니다.' : '현재 네트워크를 아직 점검하지 않았습니다.',
-                    style: Theme.of(context).textTheme.titleLarge,
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 24,
+                        backgroundColor: Theme.of(
+                          context,
+                        ).colorScheme.primaryContainer,
+                        child: Icon(_deviceIcon(device.category)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          device.displayName,
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        icon: const Icon(Icons.close),
+                        tooltip: '닫기',
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    hasScan
-                        ? '마지막 검색: ${_formatTimestamp(lastScannedAt!)}'
-                        : '탐지되지 않은 장비가 있을 수 있으므로 검색 결과와 탐지 범위를 함께 확인하세요.',
+                  const SizedBox(height: 18),
+                  _DetailRow(
+                    label: '유형',
+                    value: _categoryLabel(device.category),
                   ),
-                  if (contextInfo != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      '검색 범위: ${contextInfo.scannedSubnet} · 인터페이스 ${contextInfo.interfaceName}',
+                  _DetailRow(
+                    label: '소유 상태',
+                    value: _ownershipLabel(device.ownershipStatus),
+                  ),
+                  _DetailRow(
+                    label: 'IP 주소',
+                    value: device.ipAddresses.join(', '),
+                  ),
+                  _DetailRow(
+                    label: 'MAC 주소',
+                    value: device.macAddress ?? '확인되지 않음',
+                  ),
+                  _DetailRow(label: '제조사', value: device.vendor ?? '확인되지 않음'),
+                  _DetailRow(
+                    label: '탐색 근거',
+                    value: device.sources.map(_sourceLabel).join(', '),
+                  ),
+                  _DetailRow(
+                    label: '식별 신뢰도',
+                    value: '${(device.identityConfidence * 100).round()}%',
+                  ),
+                  _DetailRow(
+                    label: '처음 확인',
+                    value: _formatDateTime(device.firstSeenAt),
+                  ),
+                  _DetailRow(
+                    label: '최근 확인',
+                    value: _formatDateTime(device.lastSeenAt),
+                  ),
+                  const SizedBox(height: 16),
+                  _InfoCallout(
+                    icon: Icons.info_outline,
+                    text:
+                        '현재 탐색은 로컬 네트워크에서 확인 가능한 주소·이웃 테이블 중심입니다. '
+                        '서비스 포트, mDNS/SSDP 이름, 제조사 정보는 별도 탐색을 추가하면 더 풍부해집니다.',
+                  ),
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text('닫기'),
                     ),
-                  ],
+                  ),
                 ],
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ScanControls extends StatelessWidget {
-  const _ScanControls({
-    required this.isScanning,
-    required this.progress,
-    required this.onScan,
-    required this.onCancel,
-  });
-
-  final bool isScanning;
-  final DiscoveryProgress? progress;
-  final VoidCallback onScan;
-  final VoidCallback onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    final progressValue = progress?.fraction;
-    return Row(
-      children: [
-        Tooltip(
-          message: isScanning ? '검색 중지 요청' : '현재 네트워크 검색 시작',
-          child: IconButton.filled(
-            onPressed: isScanning ? onCancel : onScan,
-            icon: Icon(isScanning ? Icons.stop_circle_outlined : Icons.radar),
           ),
-        ),
-        if (isScanning) ...[
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                LinearProgressIndicator(value: progressValue),
-                const SizedBox(height: 6),
-                Text(_progressLabel(progress)),
-              ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _MetricGrid extends StatelessWidget {
-  const _MetricGrid({required this.overview});
-
-  final NetworkOverview overview;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final itemWidth = constraints.maxWidth < 520
-            ? constraints.maxWidth
-            : (constraints.maxWidth - 12) / 2;
-
-        return Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            _MetricCard(
-              width: itemWidth,
-              label: '탐지된 장비',
-              value: overview.devices.length.toString(),
-              icon: Icons.devices,
-            ),
-            _MetricCard(
-              width: itemWidth,
-              label: '미확인 장비',
-              value: overview.unconfirmedDeviceCount.toString(),
-              icon: Icons.device_unknown,
-            ),
-            _MetricCard(
-              width: itemWidth,
-              label: '신규 장비',
-              value: overview.newDeviceCount.toString(),
-              icon: Icons.fiber_new,
-            ),
-            _MetricCard(
-              width: itemWidth,
-              label: '주의 경고',
-              value: overview.warningCount.toString(),
-              icon: Icons.warning_amber,
-            ),
-            _MetricCard(
-              width: itemWidth,
-              label: '긴급 경고',
-              value: overview.criticalCount.toString(),
-              icon: Icons.gpp_bad_outlined,
-            ),
-          ],
         );
       },
-    );
-  }
-}
-
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({
-    required this.width,
-    required this.label,
-    required this.value,
-    required this.icon,
-  });
-
-  final double width;
-  final String label;
-  final String value;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: label,
-      child: Semantics(
-        label: '$label $value',
-        child: SizedBox(
-          width: width,
-          child: Card(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Icon(icon, color: Theme.of(context).colorScheme.primary),
-                  Text(value, style: Theme.of(context).textTheme.headlineSmall),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -774,38 +679,524 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _QuickSectionTile extends StatelessWidget {
-  const _QuickSectionTile({
+class _TopControlBar extends StatelessWidget {
+  const _TopControlBar({
+    required this.query,
+    required this.view,
+    required this.onQueryChanged,
+    required this.onViewChanged,
+    required this.onSettings,
+  });
+
+  final String query;
+  final _DashboardView view;
+  final ValueChanged<String> onQueryChanged;
+  final ValueChanged<_DashboardView> onViewChanged;
+  final VoidCallback onSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(Icons.wifi_tethering, color: scheme.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  onChanged: onQueryChanged,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: '장비 검색',
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    suffixIcon: query.isEmpty
+                        ? null
+                        : IconButton(
+                            onPressed: () => onQueryChanged(''),
+                            icon: const Icon(Icons.clear, size: 18),
+                            tooltip: '검색어 지우기',
+                          ),
+                    isDense: true,
+                    filled: true,
+                    fillColor: scheme.surfaceContainerHighest.withValues(
+                      alpha: 0.55,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                onPressed: onSettings,
+                icon: const Icon(Icons.settings_outlined),
+                tooltip: '설정',
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Text('보기', style: Theme.of(context).textTheme.labelMedium),
+              const SizedBox(width: 10),
+              Expanded(
+                child: SegmentedButton<_DashboardView>(
+                  segments: const [
+                    ButtonSegment(
+                      value: _DashboardView.mesh,
+                      icon: Icon(Icons.hub_outlined, size: 17),
+                      label: Text('메시'),
+                    ),
+                    ButtonSegment(
+                      value: _DashboardView.cards,
+                      icon: Icon(Icons.grid_view_rounded, size: 17),
+                      label: Text('카드'),
+                    ),
+                    ButtonSegment(
+                      value: _DashboardView.list,
+                      icon: Icon(Icons.view_list_rounded, size: 17),
+                      label: Text('목록'),
+                    ),
+                  ],
+                  selected: {view},
+                  onSelectionChanged: (selection) =>
+                      onViewChanged(selection.first),
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryPanel extends StatelessWidget {
+  const _SummaryPanel({
+    required this.deviceCount,
+    required this.warningCount,
+    required this.isScanning,
+    required this.message,
+  });
+
+  final int deviceCount;
+  final int warningCount;
+  final bool isScanning;
+  final String? message;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Expanded(
+              child: _SummaryValue(
+                icon: Icons.devices_other,
+                value: '$deviceCount',
+                label: '연결 장비',
+              ),
+            ),
+            Expanded(
+              child: _SummaryValue(
+                icon: warningCount == 0
+                    ? Icons.verified_user_outlined
+                    : Icons.warning_amber,
+                value: '$warningCount',
+                label: '보안 경고',
+                color: warningCount == 0 ? scheme.primary : scheme.error,
+              ),
+            ),
+            Expanded(
+              child: _SummaryValue(
+                icon: isScanning ? Icons.radar : Icons.check_circle_outline,
+                value: isScanning ? '진행' : '대기',
+                label: message == null ? '상태' : '최근 결과',
+                color: isScanning ? scheme.tertiary : scheme.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SummaryValue extends StatelessWidget {
+  const _SummaryValue({
     required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
+    required this.value,
+    required this.label,
+    this.color,
   });
 
   final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
+  final String value;
+  final String label;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final iconColor = color ?? Theme.of(context).colorScheme.primary;
+    return Column(
+      children: [
+        Icon(icon, color: iconColor, size: 22),
+        const SizedBox(height: 6),
+        Text(value, style: Theme.of(context).textTheme.titleMedium),
+        Text(label, style: Theme.of(context).textTheme.labelSmall),
+      ],
+    );
+  }
+}
+
+class _DeviceCountHeader extends StatelessWidget {
+  const _DeviceCountHeader({required this.count, required this.query});
+
+  final int count;
+  final String query;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text('장비 $count개', style: Theme.of(context).textTheme.titleMedium),
+        const Spacer(),
+        if (query.isNotEmpty)
+          Text('검색: $query', style: Theme.of(context).textTheme.labelMedium),
+      ],
+    );
+  }
+}
+
+class _NetworkContextCard extends StatelessWidget {
+  const _NetworkContextCard({required this.context});
+
+  final NetworkContext? context;
+
+  @override
+  Widget build(BuildContext buildContext) {
+    final network = context;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: network == null
+            ? const Row(
+                children: [
+                  Icon(Icons.info_outline),
+                  SizedBox(width: 10),
+                  Expanded(child: Text('스캔 후 인터페이스, 게이트웨이, 검색 범위가 표시됩니다.')),
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.router_outlined, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        '네트워크 정보',
+                        style: Theme.of(buildContext).textTheme.titleSmall,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _DetailRow(label: '인터페이스', value: network.interfaceName),
+                  _DetailRow(label: '내 주소', value: network.ipv4Address),
+                  _DetailRow(label: '게이트웨이', value: network.gateway),
+                  _DetailRow(label: '검색 범위', value: network.scannedSubnet),
+                  _DetailRow(
+                    label: '범위 상태',
+                    value: network.coverageLimited ? '일부 제한됨' : '전체 확인 시도',
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class _InfoCallout extends StatelessWidget {
+  const _InfoCallout({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 19, color: scheme.primary),
+          const SizedBox(width: 9),
+          Expanded(child: Text(text)),
+        ],
+      ),
+    );
+  }
+}
+
+class _DeviceCardGrid extends StatelessWidget {
+  const _DeviceCardGrid({
+    required this.devices,
+    required this.newDeviceIds,
+    required this.onDeviceTap,
+  });
+
+  final List<NetworkDevice> devices;
+  final Set<String> newDeviceIds;
+  final ValueChanged<NetworkDevice> onDeviceTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 430 ? 2 : 1;
+        return GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: devices.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: columns == 1 ? 2.8 : 1.5,
+          ),
+          itemBuilder: (context, index) {
+            final device = devices[index];
+            return Card(
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: () => onDeviceTap(device),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(_deviceIcon(device.category), size: 28),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    device.displayName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleSmall,
+                                  ),
+                                ),
+                                if (newDeviceIds.contains(device.id))
+                                  Icon(
+                                    Icons.fiber_new,
+                                    size: 16,
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              device.ipAddresses.join(', '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              device.vendor ?? _categoryLabel(device.category),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.labelSmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _MeshNetworkView extends StatelessWidget {
+  const _MeshNetworkView({
+    required this.devices,
+    required this.newDeviceIds,
+    required this.onDeviceTap,
+  });
+
+  final List<NetworkDevice> devices;
+  final Set<String> newDeviceIds;
+  final ValueChanged<NetworkDevice> onDeviceTap;
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: ListTile(
-        dense: true,
-        leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
-        title: Text(title),
-        subtitle: Text(subtitle),
-        trailing: Tooltip(
-          message: '$title 열기',
-          child: IconButton(
-            onPressed: onTap,
-            icon: const Icon(Icons.chevron_right),
-          ),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        height: 440,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final center = Offset(constraints.maxWidth / 2, 220);
+            final positions = <String, Offset>{};
+            final local = devices.cast<NetworkDevice?>().firstWhere(
+              (device) =>
+                  device!.sources.contains(DiscoverySource.localInterface),
+              orElse: () => null,
+            );
+            if (local != null) positions[local.id] = center;
+            final others = devices
+                .where((device) => device != local)
+                .toList(growable: false);
+            final radiusBase = math.min(constraints.maxWidth, 360.0);
+            for (var index = 0; index < others.length; index++) {
+              final hash = others[index].id.codeUnits.fold<int>(
+                0,
+                (sum, item) => sum + item,
+              );
+              final angle = (index * 2.399963) + (hash % 31) / 100;
+              final distance = radiusBase * (0.24 + (hash % 23) / 100);
+              positions[others[index].id] = Offset(
+                center.dx + math.cos(angle) * distance,
+                center.dy + math.sin(angle) * distance,
+              );
+            }
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: InteractiveViewer(
+                    boundaryMargin: const EdgeInsets.all(100),
+                    minScale: 0.75,
+                    maxScale: 2.5,
+                    child: SizedBox(
+                      width: constraints.maxWidth,
+                      height: 440,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: CustomPaint(
+                              painter: _MeshNetworkPainter(
+                                positions: positions,
+                                center: center,
+                                scheme: Theme.of(context).colorScheme,
+                              ),
+                            ),
+                          ),
+                          for (final device in devices)
+                            if (positions[device.id] != null)
+                              Positioned(
+                                left: positions[device.id]!.dx - 34,
+                                top: positions[device.id]!.dy - 34,
+                                child: _TopologyNode(
+                                  device: device,
+                                  isNew: newDeviceIds.contains(device.id),
+                                  onTap: () => onDeviceTap(device),
+                                ),
+                              ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 16,
+                  top: 14,
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.hub_outlined,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('메시 보기'),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  right: 12,
+                  bottom: 12,
+                  child: Text(
+                    '노드를 눌러 상세 정보',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ),
+              ],
+            );
+          },
         ),
-        onTap: onTap,
       ),
     );
   }
+}
+
+class _MeshNetworkPainter extends CustomPainter {
+  const _MeshNetworkPainter({
+    required this.positions,
+    required this.center,
+    required this.scheme,
+  });
+
+  final Map<String, Offset> positions;
+  final Offset center;
+  final ColorScheme scheme;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final ringPaint = Paint()
+      ..color = scheme.outlineVariant.withValues(alpha: 0.42)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    for (final radius in [70.0, 140.0, 210.0]) {
+      canvas.drawCircle(center, math.min(radius, size.width * 0.46), ringPaint);
+    }
+    final edgePaint = Paint()
+      ..color = scheme.primary.withValues(alpha: 0.26)
+      ..strokeWidth = 1.3;
+    for (final position in positions.values) {
+      if (position != center) canvas.drawLine(center, position, edgePaint);
+    }
+    final centerPaint = Paint()
+      ..color = scheme.primary.withValues(alpha: 0.12)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(center, 54, centerPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _MeshNetworkPainter oldDelegate) =>
+      oldDelegate.positions != positions || oldDelegate.center != center;
 }
 
 class _DetailRow extends StatelessWidget {
@@ -829,6 +1220,7 @@ class _DetailRow extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _NetworkTopologyCard extends StatelessWidget {
   const _NetworkTopologyCard({
     required this.devices,
@@ -1019,6 +1411,7 @@ class _TopologyNode extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _NetworkTopologyPainter extends CustomPainter {
   const _NetworkTopologyPainter({
     required this.devices,
@@ -1057,10 +1450,15 @@ class _NetworkTopologyPainter extends CustomPainter {
 }
 
 class _DeviceList extends StatelessWidget {
-  const _DeviceList({required this.devices, required this.newDeviceIds});
+  const _DeviceList({
+    required this.devices,
+    required this.newDeviceIds,
+    this.onDeviceTap,
+  });
 
   final List<NetworkDevice> devices;
   final Set<String> newDeviceIds;
+  final ValueChanged<NetworkDevice>? onDeviceTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1071,6 +1469,9 @@ class _DeviceList extends StatelessWidget {
           for (var index = 0; index < devices.length; index++) ...[
             ListTile(
               leading: Icon(_deviceIcon(devices[index].category)),
+              onTap: onDeviceTap == null
+                  ? null
+                  : () => onDeviceTap!(devices[index]),
               title: Row(
                 children: [
                   Expanded(child: Text(devices[index].displayName)),
@@ -1324,6 +1725,18 @@ String _ownershipLabel(OwnershipStatus status) => switch (status) {
   OwnershipStatus.unconfirmed => '소유자 미확인',
   OwnershipStatus.blocked => '차단됨',
 };
+
+String _sourceLabel(DiscoverySource source) => switch (source) {
+  DiscoverySource.localInterface => '내 인터페이스',
+  DiscoverySource.router => '공유기',
+  DiscoverySource.neighbor => '이웃 테이블',
+  DiscoverySource.subnet => '서브넷 탐색',
+  DiscoverySource.mdns => 'mDNS',
+  DiscoverySource.ssdp => 'SSDP',
+  DiscoverySource.manual => '수동 등록',
+};
+
+String _formatDateTime(DateTime value) => _formatTimestamp(value);
 
 String _severityLabel(FindingSeverity severity) => switch (severity) {
   FindingSeverity.information => '정보',

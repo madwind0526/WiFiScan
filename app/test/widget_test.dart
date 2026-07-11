@@ -12,10 +12,10 @@ void main() {
   testWidgets('shows the network security dashboard', (tester) async {
     await tester.pumpWidget(const WifiScanApp());
 
-    expect(find.text('와이파이 보안'), findsOneWidget);
-    expect(find.byTooltip('탐지된 장비'), findsOneWidget);
-    expect(find.byTooltip('미확인 장비'), findsOneWidget);
-    expect(find.byTooltip('현재 네트워크 검색 시작'), findsNWidgets(2));
+    expect(find.text('내 네트워크'), findsOneWidget);
+    expect(find.text('장비 검색'), findsOneWidget);
+    expect(find.byTooltip('설정'), findsOneWidget);
+    expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);
     expect(find.text('경고'), findsOneWidget);
   });
 
@@ -35,14 +35,16 @@ void main() {
     expect(find.textContaining('검색이 완료되었습니다.'), findsOneWidget);
     await tester.tap(find.text('장비'));
     await tester.pumpAndSettle();
-    expect(find.text('네트워크 맵'), findsOneWidget);
-    await tester.scrollUntilVisible(
-      find.text('이 Windows 컴퓨터'),
-      320,
-      scrollable: find.byType(Scrollable),
-    );
+    expect(find.text('메시 보기'), findsOneWidget);
+    await tester.tap(find.text('목록'));
+    await tester.pumpAndSettle();
     expect(find.text('이 Windows 컴퓨터'), findsOneWidget);
     expect(find.text('기본 게이트웨이'), findsOneWidget);
+    await tester.tap(find.text('이 Windows 컴퓨터'));
+    await tester.pumpAndSettle();
+    expect(find.text('식별 신뢰도'), findsOneWidget);
+    expect(find.text('MAC 주소'), findsOneWidget);
+    await tester.tap(find.byTooltip('닫기'));
   });
 
   testWidgets('allows the user to stop an active scan', (tester) async {
@@ -52,12 +54,12 @@ void main() {
 
     await tester.tap(find.byTooltip('현재 네트워크 검색 시작').first);
     await tester.pump();
-    expect(find.byTooltip('검색 중지 요청'), findsNWidgets(2));
+    expect(find.byTooltip('검색 중지 요청'), findsOneWidget);
 
     await tester.tap(find.byTooltip('검색 중지 요청').first);
     await tester.pump(const Duration(milliseconds: 20));
     expect(find.text('검색을 중지했습니다.'), findsOneWidget);
-    expect(find.byTooltip('현재 네트워크 검색 시작'), findsNWidgets(2));
+    expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);
   });
 
   testWidgets('supports a small screen without layout exceptions', (
@@ -70,11 +72,20 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
 
-    await tester.pumpWidget(const WifiScanApp());
+    await tester.pumpWidget(
+      WifiScanApp(
+        discoveryService: const _FakeDiscoveryService(),
+        inventoryRepository: InventoryRepository(store: _MemorySnapshotStore()),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
     expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);
+    await tester.tap(find.byTooltip('현재 네트워크 검색 시작'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('장비'));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
 }
