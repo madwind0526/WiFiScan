@@ -5,6 +5,11 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.LinkAddress
 import android.net.LinkProperties
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.net.wifi.WifiNetworkSpecifier
+import android.net.wifi.WifiManager
 import android.os.Build
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -24,6 +29,8 @@ class MainActivity : FlutterActivity() {
     }
 
     private var pendingPermissionResult: MethodChannel.Result? = null
+    private var pendingNetworkResult: MethodChannel.Result? = null
+    private var requestedNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private val commandExecutor = Executors.newCachedThreadPool()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -38,6 +45,9 @@ class MainActivity : FlutterActivity() {
             "requestPermission" -> requestNetworkPermission(result)
             "networkContext" -> result.success(networkContext())
             "discoverHosts" -> discoverHosts(call, result)
+            "currentSsid" -> result.success(currentSsid())
+            "connectNetwork" -> connectNetwork(call, result)
+            "restoreNetwork" -> restoreNetwork(result)
             else -> result.notImplemented()
         }
     }
@@ -121,6 +131,69 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    private fun currentSsid(): String? {
+        val info = getSystemService(WifiManager::class.java)?.connectionInfo ?: return null
+        val ssid = info.ssid?.trim('"') ?: return null
+        return if (ssid.isBlank() || ssid == WifiManager.UNKNOWN_SSID) null else ssid
+    }
+
+    private fun connectNetwork(call: MethodCall, result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            result.error("unsupported", "Android 10 이상에서만 앱이 Wi-Fi 연결을 요청할 수 있습니다.", null)
+            return
+        }
+        if (pendingNetworkResult != null) {
+            result.error("network_pending", "Wi-Fi 연결 요청이 이미 진행 중입니다.", null)
+            return
+        }
+        val ssid = call.argument<String>("ssid")?.trim().orEmpty()
+        val password = call.argument<String>("password").orEmpty()
+        if (ssid.isEmpty()) {
+            result.error("invalid_ssid", "Wi-Fi 이름이 없습니다.", null)
+            return
+        }
+        val manager = getSystemService(ConnectivityManager::class.java)
+        val builder = WifiNetworkSpecifier.Builder().setSsid(ssid)
+        if (password.isNotEmpty()) builder.setWpa2Passphrase(password)
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .setNetworkSpecifier(builder.build())
+            .build()
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                requestedNetworkCallback = this
+                manager.bindProcessToNetwork(network)
+                pendingNetworkResult?.success(true)
+                pendingNetworkResult = null
+            }
+
+            override fun onUnavailable() {
+                pendingNetworkResult?.error("network_unavailable", "Wi-Fi 연결 요청이 거부되었거나 시간 초과되었습니다.", null)
+                pendingNetworkResult = null
+                requestedNetworkCallback = null
+            }
+        }
+        pendingNetworkResult = result
+        requestedNetworkCallback = callback
+        manager.requestNetwork(request, callback)
+    }
+
+    private fun restoreNetwork(result: MethodChannel.Result) {
+        val manager = getSystemService(ConnectivityManager::class.java)
+        manager.bindProcessToNetwork(null)
+        requestedNetworkCallback?.let { callback ->
+            try {
+                manager.unregisterNetworkCallback(callback)
+            } catch (_: Exception) {
+                // The callback may already have been released by Android.
+            }
+        }
+        requestedNetworkCallback = null
+        pendingNetworkResult = null
+        result.success(true)
+    }
+
     private fun discoverHosts(call: MethodCall, result: MethodChannel.Result) {
         val network = call.argument<String>("network") ?: run {
             result.error("invalid_network", "검색 네트워크가 없습니다.", null)
@@ -193,6 +266,14 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null)
+        requestedNetworkCallback?.let { callback ->
+            try {
+                getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(callback)
+            } catch (_: Exception) {
+                // Cleanup is best effort during activity teardown.
+            }
+        }
         commandExecutor.shutdownNow()
         super.onDestroy()
     }

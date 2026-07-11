@@ -13,6 +13,10 @@ import 'package:wifi_scan/features/discovery/domain/network_context.dart';
 import 'package:wifi_scan/features/security/application/security_risk_analyzer.dart';
 import 'package:wifi_scan/features/remediation/application/remediation_planner.dart';
 import 'package:wifi_scan/features/remediation/domain/remediation_plan.dart';
+import 'package:wifi_scan/features/network_profiles/application/network_connection_service.dart';
+import 'package:wifi_scan/features/network_profiles/application/network_profile_repository.dart';
+import 'package:wifi_scan/features/network_profiles/domain/network_profile.dart';
+import 'package:wifi_scan/features/network_profiles/infrastructure/platform_network_connection_service.dart';
 
 enum _DashboardSection { overview, devices, findings }
 
@@ -40,6 +44,8 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   late final NetworkDiscoveryService _discoveryService;
   late final InventoryRepository _inventoryRepository;
   late final SecurityRiskAnalyzer _securityRiskAnalyzer;
+  late final NetworkConnectionService _connectionService;
+  late final NetworkProfileRepository _profileRepository;
   NetworkOverview _overview = const NetworkOverview.empty();
   DiscoveryResult? _lastResult;
   DiscoveryProgress? _progress;
@@ -55,6 +61,9 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   _DashboardView _view = _DashboardView.mesh;
   String _searchQuery = '';
   ThemeMode _themeMode = ThemeMode.system;
+  List<NetworkProfile> _networkProfiles = const [];
+  String? _selectedNetworkId;
+  bool _isScanningAllNetworks = false;
 
   @override
   void initState() {
@@ -66,6 +75,30 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         const InventoryRepository(store: FileInventorySnapshotStore());
     _securityRiskAnalyzer =
         widget.securityRiskAnalyzer ?? const SecurityRiskAnalyzer();
+    _connectionService = createNetworkConnectionService();
+    _profileRepository = const NetworkProfileRepository();
+    _loadNetworkProfiles();
+  }
+
+  Future<void> _loadNetworkProfiles() async {
+    final stored = await _profileRepository.load();
+    List<NetworkProfile> profiles = stored;
+    try {
+      final available = await _connectionService.discoverAvailableProfiles();
+      final known = {for (final profile in stored) profile.ssid: profile};
+      for (final profile in available) {
+        known.putIfAbsent(profile.ssid, () => profile);
+      }
+      profiles = known.values.toList(growable: false);
+      await _profileRepository.save(profiles);
+    } catch (_) {
+      // The profile list is optional and should not block the main dashboard.
+    }
+    if (!mounted) return;
+    setState(() {
+      _networkProfiles = profiles;
+      _selectedNetworkId ??= profiles.isEmpty ? null : profiles.first.id;
+    });
   }
 
   Future<void> _startScan() async {
@@ -159,6 +192,242 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     }
   }
 
+  Future<void> _scanAllNetworks() async {
+    if (_isScanning || _networkProfiles.isEmpty) return;
+    if (io.Platform.isAndroid) {
+      final shouldContinue = await _showAndroidPermissionRationale();
+      if (shouldContinue != true || !mounted) return;
+    }
+
+    final token = DiscoveryCancellationToken();
+    final originalSsid = await _connectionService.currentSsid();
+    final devicesById = <String, NetworkDevice>{};
+    final findings = <SecurityFinding>[];
+    final newDeviceIds = <String>{};
+    DiscoveryResult? lastResult;
+    var completedNetworks = 0;
+    var failures = 0;
+    setState(() {
+      _isScanning = true;
+      _isScanningAllNetworks = true;
+      _cancellationToken = token;
+      _progress = null;
+      _message = '등록된 네트워크를 준비하는 중입니다.';
+      _messageIsError = false;
+    });
+
+    try {
+      for (final profile in _networkProfiles) {
+        if (token.isCancelled) throw const DiscoveryCancelledException();
+        setState(() {
+          _selectedNetworkId = profile.id;
+          _message = '${profile.displayName}에 연결하는 중입니다.';
+        });
+        try {
+          await _connectionService.connect(profile);
+          final result = await _discoveryService.discover(
+            cancellationToken: token,
+            onProgress: (progress) {
+              if (!mounted) return;
+              setState(() => _progress = progress);
+            },
+          );
+          lastResult = result;
+          final update = await _inventoryRepository.record(result);
+          devicesById.addAll({
+            for (final device in result.devices) device.id: device,
+          });
+          newDeviceIds.addAll(update.newDevices.map((device) => device.id));
+          findings.addAll(
+            _securityRiskAnalyzer
+                .analyze(snapshot: update.snapshot, inventoryUpdate: update)
+                .findings,
+          );
+          completedNetworks += 1;
+        } on NetworkConnectionException {
+          failures += 1;
+        } on DiscoveryUnavailableException {
+          failures += 1;
+        }
+      }
+      if (!mounted) return;
+      final plans = const ManualRemediationPlanner().build(findings);
+      setState(() {
+        _overview = NetworkOverview(
+          devices: devicesById.values.toList(growable: false),
+          findings: findings,
+          lastScannedAt: DateTime.now(),
+          newDeviceCount: newDeviceIds.length,
+        );
+        _lastResult = lastResult;
+        _newDeviceIds = newDeviceIds;
+        _remediationPlans = plans;
+        _hasCompletedScan = completedNetworks > 0;
+        _securityAnalysisCompleted = completedNetworks > 0;
+        _message = failures == 0
+            ? '$completedNetworks개 네트워크 검색을 완료했습니다.'
+            : '$completedNetworks개 네트워크를 확인했습니다. $failures개 네트워크는 연결하지 못했습니다.';
+        _messageIsError = failures > 0;
+      });
+    } on DiscoveryCancelledException {
+      if (mounted) {
+        setState(() {
+          _message = '전체 네트워크 검색을 중지했습니다.';
+          _messageIsError = false;
+        });
+      }
+    } finally {
+      try {
+        await _connectionService.restore(originalSsid);
+      } catch (_) {
+        if (mounted) {
+          setState(() {
+            _message = '검색은 끝났지만 원래 Wi-Fi로 자동 복원하지 못했습니다.';
+            _messageIsError = true;
+          });
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _isScanning = false;
+          _isScanningAllNetworks = false;
+          _cancellationToken = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _showNetworkProfiles() async {
+    final nameController = TextEditingController();
+    final ssidController = TextEditingController();
+    final passwordController = TextEditingController();
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        final media = MediaQuery.of(dialogContext);
+        final maxHeight = (media.size.height - media.viewInsets.bottom - 48)
+            .clamp(320.0, 640.0)
+            .toDouble();
+        return Dialog(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: 520, maxHeight: maxHeight),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '네트워크 프로필',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Windows는 저장된 Wi-Fi 프로필을 불러오고, Android는 시스템 연결 승인을 사용합니다. 암호는 저장하지 않습니다.',
+                  ),
+                  const SizedBox(height: 16),
+                  if (_networkProfiles.isEmpty)
+                    const _InfoCallout(
+                      icon: Icons.wifi_find,
+                      text:
+                          '연결할 Wi-Fi 프로필을 아래에 추가하세요. Android에서는 네트워크 연결 승인 화면이 표시됩니다.',
+                    )
+                  else
+                    for (final profile in _networkProfiles)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.wifi),
+                        title: Text(profile.displayName),
+                        subtitle: Text(profile.ssid),
+                        trailing: IconButton(
+                          onPressed: () =>
+                              setState(() => _selectedNetworkId = profile.id),
+                          icon: Icon(
+                            _selectedNetworkId == profile.id
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_unchecked,
+                          ),
+                          tooltip: '선택',
+                        ),
+                      ),
+                  const Divider(height: 24),
+                  Text(
+                    '새 프로필 이름',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(hintText: '예: 거실 공유기'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: ssidController,
+                    decoration: const InputDecoration(
+                      labelText: 'Wi-Fi 이름(SSID)',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Wi-Fi 암호(저장하지 않음)',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        child: const Text('닫기'),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: () async {
+                          final ssid = ssidController.text.trim();
+                          if (ssid.isEmpty) return;
+                          final profile = NetworkProfile(
+                            id: ssid,
+                            ssid: ssid,
+                            displayName: nameController.text.trim().isEmpty
+                                ? ssid
+                                : nameController.text.trim(),
+                            password: passwordController.text,
+                          );
+                          final merged = [
+                            ..._networkProfiles.where(
+                              (item) => item.ssid != ssid,
+                            ),
+                            profile,
+                          ];
+                          await _profileRepository.save(merged);
+                          if (mounted) {
+                            setState(() {
+                              _networkProfiles = merged;
+                              _selectedNetworkId = profile.id;
+                            });
+                          }
+                          if (dialogContext.mounted) {
+                            Navigator.of(dialogContext).pop();
+                          }
+                        },
+                        child: const Text('프로필 추가'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    nameController.dispose();
+    ssidController.dispose();
+    passwordController.dispose();
+  }
+
   Future<bool?> _showAndroidPermissionRationale() {
     return showModalBottomSheet<bool>(
       context: context,
@@ -230,6 +499,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                 _TopControlBar(
                   query: _searchQuery,
                   view: _view,
+                  networkCount: _networkProfiles.length,
                   onQueryChanged: (value) =>
                       setState(() => _searchQuery = value.trim()),
                   onViewChanged: (view) => setState(() {
@@ -237,6 +507,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                     _section = _DashboardSection.devices;
                   }),
                   onSettings: _showSettingsSheet,
+                  onNetworks: _showNetworkProfiles,
                 ),
                 Expanded(
                   child: ListView(
@@ -279,6 +550,14 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         style: Theme.of(
           context,
         ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+      ),
+      const SizedBox(height: 14),
+      _NetworkProfilePanel(
+        profiles: _networkProfiles,
+        selectedId: _selectedNetworkId,
+        isScanning: _isScanningAllNetworks,
+        onManage: _showNetworkProfiles,
+        onScanAll: _scanAllNetworks,
       ),
       const SizedBox(height: 18),
       _SummaryPanel(
@@ -683,16 +962,20 @@ class _TopControlBar extends StatelessWidget {
   const _TopControlBar({
     required this.query,
     required this.view,
+    required this.networkCount,
     required this.onQueryChanged,
     required this.onViewChanged,
     required this.onSettings,
+    required this.onNetworks,
   });
 
   final String query;
   final _DashboardView view;
+  final int networkCount;
   final ValueChanged<String> onQueryChanged;
   final ValueChanged<_DashboardView> onViewChanged;
   final VoidCallback onSettings;
+  final VoidCallback onNetworks;
 
   @override
   Widget build(BuildContext context) {
@@ -737,6 +1020,16 @@ class _TopControlBar extends StatelessWidget {
               ),
               const SizedBox(width: 4),
               IconButton(
+                onPressed: onNetworks,
+                icon: Badge(
+                  isLabelVisible: networkCount > 0,
+                  label: Text('$networkCount'),
+                  child: const Icon(Icons.wifi_find_outlined),
+                ),
+                tooltip: '네트워크 프로필',
+              ),
+              const SizedBox(width: 2),
+              IconButton(
                 onPressed: onSettings,
                 icon: const Icon(Icons.settings_outlined),
                 tooltip: '설정',
@@ -780,6 +1073,79 @@ class _TopControlBar extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _NetworkProfilePanel extends StatelessWidget {
+  const _NetworkProfilePanel({
+    required this.profiles,
+    required this.selectedId,
+    required this.isScanning,
+    required this.onManage,
+    required this.onScanAll,
+  });
+
+  final List<NetworkProfile> profiles;
+  final String? selectedId;
+  final bool isScanning;
+  final VoidCallback onManage;
+  final VoidCallback onScanAll;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected =
+        profiles.where((profile) => profile.id == selectedId).isEmpty
+        ? null
+        : profiles.firstWhere((profile) => profile.id == selectedId);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.wifi_find_outlined,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    selected == null
+                        ? '네트워크 프로필 없음'
+                        : '선택: ${selected.displayName}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+                IconButton(
+                  onPressed: onManage,
+                  icon: const Icon(Icons.edit_outlined, size: 19),
+                  tooltip: '네트워크 프로필 관리',
+                ),
+              ],
+            ),
+            Text(
+              profiles.isEmpty
+                  ? '연결 가능한 Wi-Fi를 프로필에 추가하세요.'
+                  : '${profiles.length}개 네트워크를 순차적으로 확인할 수 있습니다.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: profiles.isEmpty || isScanning ? null : onScanAll,
+                icon: Icon(isScanning ? Icons.sync : Icons.travel_explore),
+                label: Text(isScanning ? '전체 네트워크 검색 중' : '전체 네트워크 스캔'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
