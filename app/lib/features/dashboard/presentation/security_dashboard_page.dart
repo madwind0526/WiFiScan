@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:wifi_scan/features/dashboard/domain/network_overview.dart';
 import 'package:wifi_scan/features/discovery/application/network_discovery_service.dart';
@@ -78,7 +81,6 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   String _searchQuery = '';
   ThemeMode _themeMode = ThemeMode.dark;
   List<NetworkProfile> _networkProfiles = const [];
-  String? _selectedNetworkId;
   bool _isScanningAllNetworks = false;
   final Map<String, _NetworkScanRecord> _networkScans = {};
   String? _networkFilterId;
@@ -123,7 +125,6 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     if (!mounted) return;
     setState(() {
       _networkProfiles = profiles;
-      _selectedNetworkId ??= profiles.isEmpty ? null : profiles.first.id;
       _currentSsid = ssid;
     });
   }
@@ -265,7 +266,6 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       for (final profile in _networkProfiles) {
         if (token.isCancelled) throw const DiscoveryCancelledException();
         setState(() {
-          _selectedNetworkId = profile.id;
           _message = '${profile.displayName}에 연결하는 중입니다.';
         });
         try {
@@ -374,7 +374,6 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     setState(() {
       _isScanning = true;
       _cancellationToken = token;
-      _selectedNetworkId = profile.id;
       _progress = null;
       _message = '${profile.displayName}에 연결하는 중입니다.';
       _messageIsError = false;
@@ -471,66 +470,165 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   }
 
   Future<void> _showNetworkProfiles() async {
-    final nameController = TextEditingController();
-    final ssidController = TextEditingController();
-    final passwordController = TextEditingController();
     await showDialog<void>(
       context: context,
+      barrierColor: Colors.black38,
       builder: (dialogContext) {
-        final media = MediaQuery.of(dialogContext);
-        final maxHeight = (media.size.height - media.viewInsets.bottom - 48)
-            .clamp(320.0, 640.0)
-            .toDouble();
-        return Dialog(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: 520, maxHeight: maxHeight),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: Column(
+        return _TranslucentDialog(
+          child: StatefulBuilder(
+            builder: (dialogContext, setDialogState) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    '네트워크 프로필',
-                    style: Theme.of(context).textTheme.titleLarge,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '네트워크 프로필',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        icon: const Icon(Icons.close),
+                        tooltip: '닫기',
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Windows는 저장된 Wi-Fi 프로필을 불러오고, Android는 시스템 연결 승인을 사용합니다. 암호는 저장하지 않습니다.',
-                  ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 6),
                   if (_networkProfiles.isEmpty)
-                    const _InfoCallout(
-                      icon: Icons.wifi_find,
-                      text:
-                          '연결할 Wi-Fi 프로필을 아래에 추가하세요. Android에서는 네트워크 연결 승인 화면이 표시됩니다.',
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      child: Text(
+                        '등록된 프로필이 없습니다. 아래 추가 버튼으로 등록하세요.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
                     )
                   else
                     for (final profile in _networkProfiles)
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.wifi),
-                        title: Text(profile.displayName),
-                        subtitle: Text(profile.ssid),
-                        trailing: IconButton(
-                          onPressed: () =>
-                              setState(() => _selectedNetworkId = profile.id),
-                          icon: Icon(
-                            _selectedNetworkId == profile.id
-                                ? Icons.radio_button_checked
-                                : Icons.radio_button_unchecked,
-                          ),
-                          tooltip: '선택',
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.wifi,
+                              size: 19,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    profile.displayName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                  ),
+                                  Text(
+                                    profile.ssid,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.labelSmall,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () async {
+                                await _showProfileEditor(profile);
+                                setDialogState(() {});
+                              },
+                              icon: const Icon(Icons.edit_outlined, size: 19),
+                              tooltip: '편집',
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            IconButton(
+                              onPressed: () async {
+                                await _deleteProfile(profile);
+                                setDialogState(() {});
+                              },
+                              icon: const Icon(Icons.delete_outline, size: 19),
+                              tooltip: '삭제',
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ],
                         ),
                       ),
-                  const Divider(height: 24),
-                  Text(
-                    '새 프로필 이름',
-                    style: Theme.of(context).textTheme.labelLarge,
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () async {
+                        await _showProfileEditor(null);
+                        setDialogState(() {});
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('추가'),
+                    ),
                   ),
-                  const SizedBox(height: 8),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _deleteProfile(NetworkProfile profile) async {
+    final profiles = _networkProfiles
+        .where((item) => item.id != profile.id)
+        .toList(growable: false);
+    await _profileRepository.save(profiles);
+    if (!mounted) return;
+    setState(() {
+      _networkProfiles = profiles;
+      _networkScans.remove(profile.id);
+      if (_networkFilterId == profile.id) _networkFilterId = null;
+    });
+  }
+
+  Future<void> _showProfileEditor(NetworkProfile? existing) async {
+    final nameController = TextEditingController(
+      text: existing?.displayName ?? '',
+    );
+    final ssidController = TextEditingController(text: existing?.ssid ?? '');
+    final passwordController = TextEditingController(
+      text: existing?.password ?? '',
+    );
+    var obscurePassword = true;
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black38,
+      builder: (dialogContext) {
+        return _TranslucentDialog(
+          child: StatefulBuilder(
+            builder: (dialogContext, setDialogState) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    existing == null ? '프로필 추가' : '프로필 편집',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 16),
                   TextField(
                     controller: nameController,
-                    decoration: const InputDecoration(hintText: '예: 거실 공유기'),
+                    decoration: const InputDecoration(
+                      labelText: '표시 이름',
+                      hintText: '예: 거실 공유기 5G',
+                    ),
                   ),
                   const SizedBox(height: 10),
                   TextField(
@@ -542,56 +640,74 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                   const SizedBox(height: 10),
                   TextField(
                     controller: passwordController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Wi-Fi 암호(저장하지 않음)',
+                    obscureText: obscurePassword,
+                    decoration: InputDecoration(
+                      labelText: 'Wi-Fi 암호',
+                      suffixIcon: IconButton(
+                        onPressed: () => setDialogState(
+                          () => obscurePassword = !obscurePassword,
+                        ),
+                        icon: Icon(
+                          obscurePassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          size: 20,
+                        ),
+                        tooltip: obscurePassword ? '암호 표시' : '암호 숨기기',
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
+                  Text(
+                    '암호는 암호화되어 이 기기에만 저장됩니다.',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                  const SizedBox(height: 18),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       TextButton(
                         onPressed: () => Navigator.of(dialogContext).pop(),
-                        child: const Text('닫기'),
+                        child: const Text('취소'),
                       ),
                       const SizedBox(width: 8),
                       FilledButton(
                         onPressed: () async {
                           final ssid = ssidController.text.trim();
                           if (ssid.isEmpty) return;
+                          final name = nameController.text.trim();
+                          final password = passwordController.text;
                           final profile = NetworkProfile(
                             id: ssid,
                             ssid: ssid,
-                            displayName: nameController.text.trim().isEmpty
-                                ? ssid
-                                : nameController.text.trim(),
-                            password: passwordController.text,
+                            displayName: name.isEmpty ? ssid : name,
+                            password: password.isEmpty
+                                ? existing?.password
+                                : password,
                           );
                           final merged = [
                             ..._networkProfiles.where(
-                              (item) => item.ssid != ssid,
+                              (item) =>
+                                  item.ssid != ssid &&
+                                  item.id != existing?.id,
                             ),
                             profile,
                           ];
                           await _profileRepository.save(merged);
                           if (mounted) {
-                            setState(() {
-                              _networkProfiles = merged;
-                              _selectedNetworkId = profile.id;
-                            });
+                            setState(() => _networkProfiles = merged);
                           }
                           if (dialogContext.mounted) {
                             Navigator.of(dialogContext).pop();
                           }
                         },
-                        child: const Text('프로필 추가'),
+                        child: const Text('저장'),
                       ),
                     ],
                   ),
                 ],
-              ),
-            ),
+              );
+            },
           ),
         );
       },
@@ -671,6 +787,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
               children: [
                 _TopBar(
                   isScanning: _isScanning,
+                  currentSsid: _currentSsid,
                   onScanAll: _networkProfiles.isEmpty || _isScanning
                       ? null
                       : _scanAllNetworks,
@@ -678,10 +795,12 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                   onSettings: _showSettingsSheet,
                 ),
                 Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                    children: _mainChildren(context),
-                  ),
+                  child: _section == _DashboardSection.overview
+                      ? _homeBody(context)
+                      : ListView(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                          children: _mainChildren(context),
+                        ),
                 ),
               ],
             ),
@@ -694,58 +813,92 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
 
   List<Widget> _mainChildren(BuildContext context) {
     return switch (_section) {
-      _DashboardSection.overview => _homeMainChildren(context),
+      _DashboardSection.overview => const [],
       _DashboardSection.networks => _networksChildren(context),
       _DashboardSection.devices => _deviceMainChildren(context),
       _DashboardSection.findings => _findingsChildren(context),
     };
   }
 
-  List<Widget> _homeMainChildren(BuildContext context) {
+  Widget _homeBody(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final background = isDark
+        ? const Color(0xFF1E2029)
+        : const Color(0xFFEFEFF4);
     final network = _lastResult?.context;
     final footerText = network == null
         ? '스캔 후 인터페이스, 게이트웨이, 검색 범위가 표시됩니다.'
         : '${network.interfaceName} · ${network.ipv4Address} · '
               'GW ${network.gateway} · ${network.scannedSubnet}';
-    return [
-      const SizedBox(height: 10),
-      Center(child: _CurrentNetworkChip(ssid: _currentSsid)),
-      const SizedBox(height: 14),
-      _SummaryPanel(
-        deviceCount: _overview.devices.length,
-        warningCount: _overview.findings.length,
-        networkCount: _networkProfiles.length,
-        scannedNetworkCount: _networkScans.values
-            .where((record) => !record.failed)
-            .length,
-        isScanning: _isScanning,
-        onNetworksTap: () =>
-            setState(() => _section = _DashboardSection.networks),
-      ),
-      if (_message != null) ...[
-        const SizedBox(height: 12),
-        _MessagePanel(message: _message!, isError: _messageIsError),
-      ],
-      if (_progress != null) ...[
-        const SizedBox(height: 10),
-        Text(
-          _progressLabel(_progress),
-          style: Theme.of(context).textTheme.labelMedium,
-          textAlign: TextAlign.center,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(20),
         ),
-      ],
-      const SizedBox(height: 14),
-      _MainWindowBox(
-        footerText: footerText,
-        child: _overview.devices.isNotEmpty
-            ? _MeshNetworkView(
-                devices: _filteredDevices,
-                newDeviceIds: _newDeviceIds,
-                onDeviceTap: _showDeviceDetails,
-              )
-            : const _EmptyState(),
+        child: Stack(
+          children: [
+            if (_overview.devices.isNotEmpty)
+              Positioned.fill(
+                child: _MeshNetworkView(
+                  devices: _filteredDevices,
+                  newDeviceIds: _newDeviceIds,
+                  onDeviceTap: _showDeviceDetails,
+                  framed: false,
+                ),
+              ),
+            Positioned(
+              left: 12,
+              right: 12,
+              top: 12,
+              child: Column(
+                children: [
+                  if (_message != null)
+                    _MessagePanel(message: _message!, isError: _messageIsError),
+                  if (_progress != null && _isScanning) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _progressLabel(_progress),
+                      style: Theme.of(context).textTheme.labelMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Positioned(
+              left: 16,
+              bottom: 36,
+              child: _MiniSummary(
+                deviceCount: _overview.devices.length,
+                warningCount: _overview.findings.length,
+                networkCount: _networkProfiles.length,
+                scannedNetworkCount: _networkScans.values
+                    .where((record) => !record.failed)
+                    .length,
+                onNetworksTap: () =>
+                    setState(() => _section = _DashboardSection.networks),
+              ),
+            ),
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 10,
+              child: Text(
+                footerText,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  fontSize: 10,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
-    ];
+    );
   }
 
   List<Widget> _networksChildren(BuildContext context) {
@@ -979,26 +1132,9 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
             selected: _section == _DashboardSection.networks,
             onTap: () => setState(() => _section = _DashboardSection.networks),
           ),
-          Expanded(
-            child: Tooltip(
-              message: _isScanning ? '검색 중지 요청' : '현재 네트워크 검색 시작',
-              child: InkWell(
-                onTap: _isScanning ? _cancelScan : _startScan,
-                child: SizedBox.expand(
-                  child: Align(
-                    alignment: Alignment.bottomCenter,
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Icon(
-                        _isScanning ? Icons.stop_rounded : Icons.radar,
-                        size: 48,
-                        color: scheme.primary,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+          _ScanButton(
+            isScanning: _isScanning,
+            onTap: _isScanning ? _cancelScan : _startScan,
           ),
           _NavItem(
             icon: Icons.devices_other,
@@ -1018,58 +1154,179 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   }
 
   Future<void> _showSettingsSheet() async {
-    await showModalBottomSheet<void>(
+    await showDialog<void>(
       context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) => SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('설정', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 16),
-              Text('화면', style: Theme.of(context).textTheme.labelLarge),
-              const SizedBox(height: 10),
-              SegmentedButton<ThemeMode>(
-                segments: const [
-                  ButtonSegment(value: ThemeMode.system, label: Text('시스템')),
-                  ButtonSegment(value: ThemeMode.light, label: Text('라이트')),
-                  ButtonSegment(value: ThemeMode.dark, label: Text('다크')),
+      barrierColor: Colors.black38,
+      builder: (dialogContext) {
+        return _TranslucentDialog(
+          child: StatefulBuilder(
+            builder: (dialogContext, setDialogState) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('설정', style: Theme.of(context).textTheme.titleLarge),
+                  const SizedBox(height: 16),
+                  Text('Theme', style: Theme.of(context).textTheme.labelLarge),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<ThemeMode>(
+                      segments: const [
+                        ButtonSegment(
+                          value: ThemeMode.light,
+                          icon: Icon(Icons.light_mode_outlined, size: 17),
+                          label: Text('Light'),
+                        ),
+                        ButtonSegment(
+                          value: ThemeMode.dark,
+                          icon: Icon(Icons.dark_mode_outlined, size: 17),
+                          label: Text('Dark'),
+                        ),
+                      ],
+                      selected: {
+                        _themeMode == ThemeMode.light
+                            ? ThemeMode.light
+                            : ThemeMode.dark,
+                      },
+                      onSelectionChanged: (selection) {
+                        final value = selection.first;
+                        setDialogState(() {});
+                        setState(() => _themeMode = value);
+                        widget.onThemeModeChanged?.call(value);
+                      },
+                      showSelectedIcon: false,
+                    ),
+                  ),
+                  const Divider(height: 28),
+                  Text(
+                    '네트워크 프로필 파일',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            Navigator.of(dialogContext).pop();
+                            await _importProfiles();
+                          },
+                          icon: const Icon(Icons.file_download_outlined),
+                          label: const Text('가져오기'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            Navigator.of(dialogContext).pop();
+                            await _exportProfiles();
+                          },
+                          icon: const Icon(Icons.file_upload_outlined),
+                          label: const Text('내보내기'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '저장된 Wi-Fi 프로필을 파일로 내보내거나 불러옵니다. 암호는 암호화되어 저장됩니다.',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text('닫기'),
+                    ),
+                  ),
                 ],
-                selected: {_themeMode},
-                onSelectionChanged: (selection) {
-                  final value = selection.first;
-                  setState(() => _themeMode = value);
-                  widget.onThemeModeChanged?.call(value);
-                },
-                showSelectedIcon: false,
-              ),
-              const Divider(height: 24),
-              const ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.lock_outline),
-                title: Text('로컬 우선 처리'),
-                subtitle: Text('스캔 결과는 기본적으로 기기 안에서만 처리합니다.'),
-              ),
-              const ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.policy_outlined),
-                title: Text('비침투 점검'),
-                subtitle: Text('비밀번호 대입, 취약점 악용, 무단 설정 변경을 수행하지 않습니다.'),
-              ),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () => Navigator.of(sheetContext).pop(),
-                  child: const Text('닫기'),
-                ),
-              ),
-            ],
+              );
+            },
           ),
-        ),
-      ),
+        );
+      },
     );
+  }
+
+  Future<void> _exportProfiles() async {
+    if (_networkProfiles.isEmpty) {
+      setState(() {
+        _message = '내보낼 네트워크 프로필이 없습니다.';
+        _messageIsError = true;
+      });
+      return;
+    }
+    try {
+      final content = await _profileRepository.encode(_networkProfiles);
+      final path = await FilePicker.saveFile(
+        dialogTitle: '네트워크 프로필 내보내기',
+        fileName: 'wifiscan_profiles.json',
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+        bytes: utf8.encode(content),
+      );
+      if (path == null) return;
+      if (!io.Platform.isAndroid && !io.Platform.isIOS) {
+        await io.File(path).writeAsString(content, flush: true);
+      }
+      if (!mounted) return;
+      setState(() {
+        _message = '네트워크 프로필 ${_networkProfiles.length}개를 내보냈습니다.';
+        _messageIsError = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _message = '네트워크 프로필을 내보내지 못했습니다.';
+        _messageIsError = true;
+      });
+    }
+  }
+
+  Future<void> _importProfiles() async {
+    try {
+      final result = await FilePicker.pickFiles(
+        dialogTitle: '네트워크 프로필 가져오기',
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+      );
+      final path = result?.files.single.path;
+      if (path == null) return;
+      final imported = await _profileRepository.decode(
+        await io.File(path).readAsString(),
+      );
+      if (imported.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _message = '가져올 프로필이 없거나 파일 형식이 올바르지 않습니다.';
+          _messageIsError = true;
+        });
+        return;
+      }
+      final merged = {
+        for (final profile in _networkProfiles) profile.ssid: profile,
+      };
+      for (final profile in imported) {
+        merged[profile.ssid] = profile;
+      }
+      final profiles = merged.values.toList(growable: false);
+      await _profileRepository.save(profiles);
+      if (!mounted) return;
+      setState(() {
+        _networkProfiles = profiles;
+        _message = '네트워크 프로필 ${imported.length}개를 가져왔습니다.';
+        _messageIsError = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _message = '네트워크 프로필을 가져오지 못했습니다.';
+        _messageIsError = true;
+      });
+    }
   }
 
   Future<void> _openRemediationPlan(RemediationPlan plan) async {
@@ -1247,15 +1504,50 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
+class _TranslucentDialog extends StatelessWidget {
+  const _TranslucentDialog({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+          child: Container(
+            width: 420,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: scheme.surface.withValues(alpha: 0.78),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: scheme.outlineVariant.withValues(alpha: 0.6),
+              ),
+            ),
+            child: SingleChildScrollView(child: child),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.isScanning,
+    required this.currentSsid,
     required this.onScanAll,
     required this.onNetworks,
     required this.onSettings,
   });
 
   final bool isScanning;
+  final String? currentSsid;
   final VoidCallback? onScanAll;
   final VoidCallback onNetworks;
   final VoidCallback onSettings;
@@ -1276,7 +1568,7 @@ class _TopBar extends StatelessWidget {
           children: [
             Icon(Icons.wifi_tethering, color: scheme.primary, size: 22),
             const SizedBox(width: 10),
-            Expanded(
+            Flexible(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1301,6 +1593,9 @@ class _TopBar extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+            Expanded(
+              child: Center(child: _CurrentNetworkChip(ssid: currentSsid)),
             ),
             IconButton(
               onPressed: onScanAll,
@@ -1353,8 +1648,89 @@ class _NavItem extends StatelessWidget {
             child: Align(
               alignment: Alignment.bottomCenter,
               child: Padding(
-                padding: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.only(bottom: 18),
                 child: Icon(icon, size: 24, color: color),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ScanButton extends StatefulWidget {
+  const _ScanButton({required this.isScanning, required this.onTap});
+
+  final bool isScanning;
+  final VoidCallback onTap;
+
+  @override
+  State<_ScanButton> createState() => _ScanButtonState();
+}
+
+class _ScanButtonState extends State<_ScanButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 2),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isScanning) _controller.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ScanButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isScanning && !oldWidget.isScanning) {
+      _controller.repeat();
+    } else if (!widget.isScanning && oldWidget.isScanning) {
+      _controller
+        ..stop()
+        ..reset();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Expanded(
+      child: Tooltip(
+        message: widget.isScanning ? '검색 중지 요청' : '현재 네트워크 검색 시작',
+        child: InkWell(
+          onTap: widget.onTap,
+          child: SizedBox.expand(
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: RotationTransition(
+                  turns: _controller,
+                  child: ShaderMask(
+                    blendMode: BlendMode.srcIn,
+                    shaderCallback: (bounds) => LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: widget.isScanning
+                          ? [scheme.tertiary, scheme.primary]
+                          : [scheme.primary, scheme.secondary],
+                    ).createShader(bounds),
+                    child: const Icon(
+                      Icons.track_changes,
+                      size: 48,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -1684,73 +2060,12 @@ class _CurrentNetworkChip extends StatelessWidget {
   }
 }
 
-class _MainWindowBox extends StatelessWidget {
-  const _MainWindowBox({required this.child, required this.footerText});
-
-  final Widget child;
-  final String footerText;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final background = isDark
-        ? const Color(0xFF1E2029)
-        : const Color(0xFFEFEFF4);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          child,
-          const SizedBox(height: 10),
-          Text(
-            footerText,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              fontSize: 10,
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState();
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      height: 380,
-      child: Center(
-        child: Text(
-          'Empty',
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-            color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.2,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SummaryPanel extends StatelessWidget {
-  const _SummaryPanel({
+class _MiniSummary extends StatelessWidget {
+  const _MiniSummary({
     required this.deviceCount,
     required this.warningCount,
     required this.networkCount,
     required this.scannedNetworkCount,
-    required this.isScanning,
     required this.onNetworksTap,
   });
 
@@ -1758,77 +2073,78 @@ class _SummaryPanel extends StatelessWidget {
   final int warningCount;
   final int networkCount;
   final int scannedNetworkCount;
-  final bool isScanning;
   final VoidCallback onNetworksTap;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Expanded(
-              child: _SummaryValue(
-                icon: Icons.devices_other,
-                value: '$deviceCount',
-                tooltip: '연결 장비',
-              ),
-            ),
-            Expanded(
-              child: _SummaryValue(
-                icon: warningCount == 0
-                    ? Icons.verified_user_outlined
-                    : Icons.warning_amber,
-                value: '$warningCount',
-                tooltip: '보안 경고',
-                color: warningCount == 0 ? scheme.primary : scheme.error,
-              ),
-            ),
-            Expanded(
-              child: InkWell(
-                onTap: onNetworksTap,
-                borderRadius: BorderRadius.circular(10),
-                child: _SummaryValue(
-                  icon: isScanning ? Icons.radar : Icons.wifi,
-                  value: '$scannedNetworkCount/$networkCount',
-                  tooltip: '네트워크',
-                  color: isScanning ? scheme.tertiary : scheme.primary,
-                ),
-              ),
-            ),
-          ],
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _MiniSummaryRow(
+          icon: Icons.devices_other,
+          value: '$deviceCount',
+          tooltip: '연결 장비',
+          color: scheme.primary,
         ),
-      ),
+        const SizedBox(height: 8),
+        _MiniSummaryRow(
+          icon: warningCount == 0
+              ? Icons.verified_user_outlined
+              : Icons.warning_amber,
+          value: '$warningCount',
+          tooltip: '보안 경고',
+          color: warningCount == 0 ? scheme.primary : scheme.error,
+        ),
+        const SizedBox(height: 8),
+        _MiniSummaryRow(
+          icon: Icons.wifi,
+          value: '$scannedNetworkCount/$networkCount',
+          tooltip: '네트워크',
+          color: scheme.primary,
+          onTap: onNetworksTap,
+        ),
+      ],
     );
   }
 }
 
-class _SummaryValue extends StatelessWidget {
-  const _SummaryValue({
+class _MiniSummaryRow extends StatelessWidget {
+  const _MiniSummaryRow({
     required this.icon,
     required this.value,
     required this.tooltip,
-    this.color,
+    required this.color,
+    this.onTap,
   });
 
   final IconData icon;
   final String value;
   final String tooltip;
-  final Color? color;
+  final Color color;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final iconColor = color ?? Theme.of(context).colorScheme.primary;
     return Tooltip(
       message: tooltip,
-      child: Column(
-        children: [
-          Icon(icon, color: iconColor, size: 33),
-          const SizedBox(height: 6),
-          Text(value, style: Theme.of(context).textTheme.titleMedium),
-        ],
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 23, color: color),
+            const SizedBox(width: 7),
+            Text(
+              value,
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2024,21 +2340,30 @@ class _MeshNetworkView extends StatelessWidget {
     required this.devices,
     required this.newDeviceIds,
     required this.onDeviceTap,
+    this.framed = true,
   });
 
   final List<NetworkDevice> devices;
   final Set<String> newDeviceIds;
   final ValueChanged<NetworkDevice> onDeviceTap;
+  final bool framed;
 
   @override
   Widget build(BuildContext context) {
+    if (!framed) return _content(context);
     return Card(
       clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        height: 440,
-        child: LayoutBuilder(
+      child: SizedBox(height: 440, child: _content(context)),
+    );
+  }
+
+  Widget _content(BuildContext context) {
+    return LayoutBuilder(
           builder: (context, constraints) {
-            final center = Offset(constraints.maxWidth / 2, 220);
+            final viewHeight = constraints.maxHeight.isFinite
+                ? constraints.maxHeight
+                : 440.0;
+            final center = Offset(constraints.maxWidth / 2, viewHeight / 2);
             final positions = <String, Offset>{};
             final local = devices.cast<NetworkDevice?>().firstWhere(
               (device) =>
@@ -2071,7 +2396,7 @@ class _MeshNetworkView extends StatelessWidget {
                     maxScale: 2.5,
                     child: SizedBox(
                       width: constraints.maxWidth,
-                      height: 440,
+                      height: viewHeight,
                       child: Stack(
                         children: [
                           Positioned.fill(
@@ -2125,8 +2450,6 @@ class _MeshNetworkView extends StatelessWidget {
               ],
             );
           },
-        ),
-      ),
     );
   }
 }

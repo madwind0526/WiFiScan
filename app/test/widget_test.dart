@@ -16,7 +16,6 @@ void main() {
 
     expect(find.text('WifiScan'), findsOneWidget);
     expect(find.text('v1.0.0'), findsOneWidget);
-    expect(find.text('Empty'), findsOneWidget);
     expect(find.byTooltip('설정'), findsOneWidget);
     expect(find.byTooltip('전체 네트워크 스캔'), findsOneWidget);
     expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);

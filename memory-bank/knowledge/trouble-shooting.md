@@ -18,6 +18,14 @@
 - 해결: `NetworkConnectionService`를 `WifiScanApp`/`SecurityDashboardPage` 생성자 파라미터로 주입 가능하게 만들고, 테스트에서는 즉시 반환하는 `_FakeConnectionService`를 전달했다.
 - 검증: `flutter test` 전체 통과.
 
+## file_picker 11.x API 변경
+
+- 확인일: 2026-07-14
+- 증상: `FilePicker.platform.pickFiles(...)` 호출 시 `The getter 'platform' isn't defined` 컴파일 오류.
+- 원인: file_picker 11.0부터 `FilePicker.platform` 인스턴스 접근이 제거되고 `FilePicker.pickFiles(...)`, `FilePicker.saveFile(...)` 정적 메서드로 바뀌었다.
+- 해결: 정적 메서드로 직접 호출. `saveFile`은 데스크톱에서 경로만 반환하므로 파일 쓰기는 직접 수행한다(모바일은 `bytes` 파라미터로 저장됨).
+- 검증: flutter analyze 통과, Windows 빌드 성공.
+
 ## 고정 높이 아이콘 바의 큰 글자 배율 오버플로
 
 - 확인일: 2026-07-14
