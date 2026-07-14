@@ -8,7 +8,10 @@ import 'package:wifi_scan/features/inventory/domain/network_device.dart';
 import 'package:wifi_scan/features/inventory/application/inventory_repository.dart';
 import 'package:wifi_scan/features/inventory/domain/inventory_snapshot.dart';
 import 'package:wifi_scan/features/network_profiles/application/network_connection_service.dart';
+import 'package:wifi_scan/features/network_profiles/application/network_profile_repository.dart';
 import 'package:wifi_scan/features/network_profiles/domain/network_profile.dart';
+import 'package:wifi_scan/features/network_profiles/infrastructure/profile_backup_codec.dart';
+import 'package:wifi_scan/features/network_profiles/infrastructure/profile_transfer_file_service.dart';
 
 void main() {
   testWidgets('shows the network security dashboard', (tester) async {
@@ -98,6 +101,183 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'profile editor supports keyboard, large text, save, and cancel',
+    (tester) async {
+      final profileRepository = _MemoryProfileRepository();
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetViewInsets);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      await tester.pumpWidget(
+        WifiScanApp(
+          discoveryService: const _FakeDiscoveryService(),
+          inventoryRepository: InventoryRepository(
+            store: _MemorySnapshotStore(),
+          ),
+          connectionService: const _FakeConnectionService(),
+          profileRepository: profileRepository,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('네트워크 프로필'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('추가'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsNWidgets(3));
+
+      tester.view.viewInsets = FakeViewPadding(bottom: 260);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).at(0), '취소할 프로필');
+      await tester.enterText(find.byType(TextField).at(1), 'Cancel-WiFi');
+      await tester.enterText(find.byType(TextField).at(2), 'cancel-password');
+      await tester.ensureVisible(find.text('취소'));
+      await tester.tap(find.text('취소'));
+      await tester.pumpAndSettle();
+      expect(profileRepository.profiles, isEmpty);
+      expect(tester.takeException(), isNull);
+
+      tester.view.resetViewInsets();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('추가'));
+      await tester.pumpAndSettle();
+      tester.view.viewInsets = FakeViewPadding(bottom: 260);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).at(0), '거실 공유기');
+      await tester.enterText(find.byType(TextField).at(1), 'LivingRoom-5G');
+      await tester.enterText(find.byType(TextField).at(2), 'saved-password');
+      await tester.ensureVisible(find.text('저장'));
+      await tester.tap(find.text('저장'));
+      await tester.pumpAndSettle();
+
+      expect(profileRepository.profiles, hasLength(1));
+      expect(profileRepository.profiles.single.ssid, 'LivingRoom-5G');
+      expect(profileRepository.profiles.single.password, 'saved-password');
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'encrypted profile export and import support keyboard and large text',
+    (tester) async {
+      final repository = _MemoryProfileRepository(const [
+        NetworkProfile(
+          id: 'LivingRoom-5G',
+          ssid: 'LivingRoom-5G',
+          displayName: '거실 공유기',
+          password: 'wifi-local-secret',
+        ),
+      ]);
+      final codec = ProfileBackupCodec.forTesting();
+      final transferService = _MemoryProfileTransferFileService();
+      transferService.contentToPick = await codec.exportProfiles(const [
+        NetworkProfile(
+          id: 'Office-WiFi',
+          ssid: 'Office-WiFi',
+          displayName: '사무실',
+          password: 'office-secret',
+        ),
+      ], password: 'import-password');
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetViewInsets);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      await tester.pumpWidget(
+        WifiScanApp(
+          discoveryService: const _FakeDiscoveryService(),
+          inventoryRepository: InventoryRepository(
+            store: _MemorySnapshotStore(),
+          ),
+          connectionService: const _FakeConnectionService(),
+          profileRepository: repository,
+          profileBackupCodec: codec,
+          profileTransferFileService: transferService,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('설정'));
+      await tester.pumpAndSettle();
+      expect(find.text('Theme'), findsOneWidget);
+      expect(find.text('Light'), findsOneWidget);
+      expect(find.text('Dark'), findsOneWidget);
+      await tester.ensureVisible(find.text('내보내기'));
+      await tester.tap(find.text('내보내기'));
+      await tester.pumpAndSettle();
+      expect(find.text('내보내기 암호 설정'), findsOneWidget);
+      await tester.ensureVisible(find.text('취소'));
+      await tester.tap(find.text('취소'));
+      await tester.pumpAndSettle();
+      expect(transferService.savedContent, isNull);
+
+      await tester.tap(find.byTooltip('설정'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('내보내기'));
+      await tester.tap(find.text('내보내기'));
+      await tester.pumpAndSettle();
+      tester.view.viewInsets = FakeViewPadding(bottom: 260);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('profile-backup-password')),
+        'export-password',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('profile-backup-password-confirmation')),
+        'different-password',
+      );
+      await tester.ensureVisible(find.text('내보내기'));
+      await tester.tap(find.text('내보내기'));
+      await tester.pumpAndSettle();
+      expect(find.text('입력한 암호가 서로 다릅니다.'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('profile-backup-password-confirmation')),
+        'export-password',
+      );
+      await tester.ensureVisible(find.text('내보내기'));
+      await tester.tap(find.text('내보내기'));
+      await tester.pumpAndSettle();
+      expect(transferService.savedContent, isNotNull);
+      expect(
+        transferService.savedContent,
+        isNot(contains('wifi-local-secret')),
+      );
+      expect(tester.takeException(), isNull);
+
+      tester.view.resetViewInsets();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('설정'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('가져오기'));
+      await tester.tap(find.text('가져오기'));
+      await tester.pumpAndSettle();
+      expect(find.text('내보내기 암호 입력'), findsOneWidget);
+      tester.view.viewInsets = FakeViewPadding(bottom: 260);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('profile-backup-password')),
+        'import-password',
+      );
+      await tester.ensureVisible(find.text('불러오기'));
+      await tester.tap(find.text('불러오기'));
+      await tester.pumpAndSettle();
+
+      expect(
+        repository.profiles.map((profile) => profile.ssid),
+        containsAll(['LivingRoom-5G', 'Office-WiFi']),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 class _FakeDiscoveryService implements NetworkDiscoveryService {
@@ -205,5 +385,37 @@ class _MemorySnapshotStore implements InventorySnapshotStore {
     snapshots
       ..clear()
       ..addAll(value);
+  }
+}
+
+class _MemoryProfileRepository extends NetworkProfileRepository {
+  _MemoryProfileRepository([Iterable<NetworkProfile> initial = const []]) {
+    profiles.addAll(initial);
+  }
+
+  final List<NetworkProfile> profiles = [];
+
+  @override
+  Future<List<NetworkProfile>> load() async => List.unmodifiable(profiles);
+
+  @override
+  Future<void> save(List<NetworkProfile> value) async {
+    profiles
+      ..clear()
+      ..addAll(value);
+  }
+}
+
+class _MemoryProfileTransferFileService implements ProfileTransferFileService {
+  String? contentToPick;
+  String? savedContent;
+
+  @override
+  Future<String?> pick() async => contentToPick;
+
+  @override
+  Future<bool> save(String content) async {
+    savedContent = content;
+    return true;
   }
 }

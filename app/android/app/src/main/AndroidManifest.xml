@@ -11,6 +11,7 @@
     <application
         android:label="와이파이 스캔"
         android:name="${applicationName}"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"

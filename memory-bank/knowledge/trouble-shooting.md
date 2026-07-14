@@ -33,3 +33,28 @@
 - 원인: 고정 높이 컨테이너 안의 라벨 텍스트가 배율에 비례해 커진다.
 - 해결: 바 내부를 `MediaQuery.withClampedTextScaling(maxScaleFactor: 1.3, ...)`으로 감싸고, 제목 텍스트는 `Expanded` + ellipsis로 처리했다.
 - 검증: 320×568 + textScale 2 위젯 테스트 통과.
+
+## file_picker 11 + AGP 9 legacy Kotlin에서 Android 플러그인 클래스 누락
+
+- 확인일: 2026-07-14
+- 증상: `flutter build apk --debug`에서 `GeneratedPluginRegistrant.java`가 `FilePickerPlugin`을 찾지 못해 실패했다.
+- 원인: 프로젝트는 다른 플러그인 호환성을 위해 `android.builtInKotlin=false`를 사용하지만, file_picker 11.0.2는 AGP 9 이상이면 Kotlin Gradle Plugin과 JVM target 설정을 생략해 Kotlin 소스가 컴파일되지 않았다.
+- 해결: 루트 `android/build.gradle.kts`에서 `file_picker` 서브프로젝트에만 `org.jetbrains.kotlin.android`를 적용하고 Kotlin JVM target을 17로 지정했다. 보안 수정이 포함된 file_picker 11.0.2는 유지했다.
+- 검증: `flutter build apk --debug` 성공, `build/app/outputs/flutter-apk/app-debug.apk` 생성.
+- 후속: 모든 Android 플러그인이 AGP 9 built-in Kotlin을 지원하면 이 한정 우회를 제거하고 built-in Kotlin으로 전환한다.
+
+## 다이얼로그 닫힘 중 TextEditingController 조기 dispose
+
+- 확인일: 2026-07-14
+- 증상: 프로필 편집창에서 키보드를 연 채 취소하면 `A TextEditingController was used after being disposed` 예외가 발생했다.
+- 원인: `showDialog` Future는 route 역방향 애니메이션이 완전히 끝나기 전에 완료될 수 있는데, 호출 메서드가 Future 완료 직후 controller를 dispose했다.
+- 해결: 프로필 편집 UI를 전용 `StatefulWidget`으로 분리하고 controller를 State가 소유하도록 했다. 저장 결과만 `Navigator.pop`으로 반환하고 controller는 State의 실제 `dispose` 시점에 정리한다.
+- 검증: 320×568, textScale 2, viewInsets bottom 260 조건에서 입력 후 취소와 저장 모두 통과하고 전체 위젯 테스트 통과.
+
+## 앱 고정 키 passwordEnc를 OS 보안 저장소로 이전
+
+- 확인일: 2026-07-15
+- 증상: 프로필 JSON의 `passwordEnc`는 평문은 아니지만 앱에 포함된 고정 seed로 복호화할 수 있어 기기 보안 경계와 분리되지 않았다.
+- 원인: 로컬 저장과 기기 간 내보내기가 같은 앱 고정 키 암호화 경로를 공유했다.
+- 해결: 새 암호는 `flutter_secure_storage`에 프로필별로 저장하고 메타데이터 JSON에는 암호 필드를 쓰지 않는다. 기존 `passwordEnc`는 로드 시 복호화해 보안 저장소로 옮긴 뒤 모든 이전이 성공한 경우에만 JSON에서 제거한다. 내보내기는 별도의 사용자 암호 기반 PBKDF2-HMAC-SHA256 + AES-256-GCM 포맷으로 분리했다.
+- 검증: 메타데이터 비밀값 부재, 보안 저장소 복원, 프로필 삭제, 기존 형식 이전 단위 테스트와 암호 내보내기/불러오기 위젯 테스트 통과. Android debug APK 및 Windows release 빌드 성공.

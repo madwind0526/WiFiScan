@@ -2,12 +2,10 @@ import 'dart:convert';
 
 import 'package:cryptography/cryptography.dart';
 
-/// Encrypts profile passwords at rest with AES-GCM.
+/// Decrypts passwords written by the legacy local profile format.
 ///
-/// The key is derived from an application-level seed so exported profile
-/// files stay readable on another device running WifiScan. This protects
-/// against casual inspection of the JSON file, not against an attacker
-/// who can run code on the device.
+/// New passwords are stored by ProfileCredentialStore. This cipher remains
+/// only so existing passwordEnc values can be migrated without data loss.
 class ProfileCipher {
   const ProfileCipher();
 
@@ -35,10 +33,7 @@ class ProfileCipher {
         nonceLength: AesGcm.defaultNonceLength,
         macLength: 16,
       );
-      final clear = await algorithm.decrypt(
-        box,
-        secretKey: await _secretKey(),
-      );
+      final clear = await algorithm.decrypt(box, secretKey: await _secretKey());
       return utf8.decode(clear);
     } catch (_) {
       return null;

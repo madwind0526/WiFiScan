@@ -2,10 +2,10 @@
 
 ## Current Wave
 
-- **Wave:** 7
+- **Wave:** 9
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-14 Wave 7 세로형 아이콘 셸 리디자인, 네트워크 탭(공유기 그룹/밴드), 네트워크별 스캔 기록·필터, analyze/test/build 검증 완료
+- **Last Checkpoint:** 2026-07-15 Wave 9 OS 보안 저장소, 기존 passwordEnc 이전, 암호 기반 프로필 가져오기/내보내기, 키보드 회귀, analyze/test/Windows/APK 검증 완료
 
 ## Wave History
 
@@ -19,6 +19,8 @@
 | 5 | 공유기 커넥터와 승인 기반 방어 조치 | Done |
 | 6 | Android 권한/성능/회귀 검증 흐름 | Done |
 | 7 | 세로형 아이콘 셸 UI 리디자인과 네트워크 탭 | Done |
+| 8 | Android APK 빌드 복구와 프로필 입력 다이얼로그 회귀 수정 | Done |
+| 9 | OS 보안 저장소와 암호 기반 프로필 가져오기/내보내기 | Done |
 
 ## Session Notes
 

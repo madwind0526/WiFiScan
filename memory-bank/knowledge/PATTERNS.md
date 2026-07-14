@@ -31,3 +31,11 @@ Windows 창을 480×920 세로형으로 고정하고, 상단 58px 아이콘 바(
 ## Per-Network Scan Records
 
 멀티 Wi-Fi 스캔 결과는 프로필 id → `_NetworkScanRecord(deviceIds, scannedAt, failed)` 맵으로 저장한다. SSID의 밴드(2.4G/5G)는 정규식 휴리스틱으로 판별하고, 밴드 접미사를 제거한 기본 이름으로 공유기 단위 그룹핑을 한다. 장비 탭은 이 레코드의 deviceIds로 네트워크별 필터링을 한다.
+
+## Keyboard-Safe Translucent Dialog
+
+입력 다이얼로그는 `Dialog` 안에 화면 높이와 `MediaQuery.viewInsets.bottom`을 반영한 `ConstrainedBox`를 두고, 본문은 `Flexible(SingleChildScrollView)`로 감싼다. `TextEditingController`는 다이얼로그 전용 `StatefulWidget`이 소유하고 해당 State의 `dispose`에서 정리해 route 닫힘 애니메이션보다 먼저 폐기되지 않게 한다. 작은 화면, 2배 글꼴, 키보드 표시 상태에서 입력·저장·취소를 모두 위젯 테스트한다.
+
+## Split Profile Metadata, Credentials, and Backups
+
+프로필 저장을 세 계층으로 나눈다. SSID와 표시 이름 같은 메타데이터는 로컬 JSON, Wi-Fi 암호는 `flutter_secure_storage`, 기기 간 이동용 파일은 사용자 암호 기반 PBKDF2 + AES-GCM 암호문으로 저장한다. 백업 코덱과 파일 선택 서비스를 UI에 주입 가능하게 분리하면 실제 파일 선택 플러그인 없이도 암호 확인, 취소, 저장, 불러오기 흐름을 위젯 테스트할 수 있다.

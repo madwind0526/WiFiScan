@@ -1,9 +1,7 @@
-import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:wifi_scan/features/dashboard/domain/network_overview.dart';
 import 'package:wifi_scan/features/discovery/application/network_discovery_service.dart';
@@ -20,6 +18,8 @@ import 'package:wifi_scan/features/network_profiles/application/network_connecti
 import 'package:wifi_scan/features/network_profiles/application/network_profile_repository.dart';
 import 'package:wifi_scan/features/network_profiles/domain/network_profile.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/platform_network_connection_service.dart';
+import 'package:wifi_scan/features/network_profiles/infrastructure/profile_backup_codec.dart';
+import 'package:wifi_scan/features/network_profiles/infrastructure/profile_transfer_file_service.dart';
 
 const String _buildVersion = 'v1.0.0';
 
@@ -46,6 +46,9 @@ class SecurityDashboardPage extends StatefulWidget {
     this.inventoryRepository,
     this.securityRiskAnalyzer,
     this.connectionService,
+    this.profileRepository,
+    this.profileBackupCodec,
+    this.profileTransferFileService,
     this.onThemeModeChanged,
   });
 
@@ -53,6 +56,9 @@ class SecurityDashboardPage extends StatefulWidget {
   final InventoryRepository? inventoryRepository;
   final SecurityRiskAnalyzer? securityRiskAnalyzer;
   final NetworkConnectionService? connectionService;
+  final NetworkProfileRepository? profileRepository;
+  final ProfileBackupCodec? profileBackupCodec;
+  final ProfileTransferFileService? profileTransferFileService;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
 
   @override
@@ -65,6 +71,8 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   late final SecurityRiskAnalyzer _securityRiskAnalyzer;
   late final NetworkConnectionService _connectionService;
   late final NetworkProfileRepository _profileRepository;
+  late final ProfileBackupCodec _profileBackupCodec;
+  late final ProfileTransferFileService _profileTransferFileService;
   NetworkOverview _overview = const NetworkOverview.empty();
   DiscoveryResult? _lastResult;
   DiscoveryProgress? _progress;
@@ -98,7 +106,11 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         widget.securityRiskAnalyzer ?? const SecurityRiskAnalyzer();
     _connectionService =
         widget.connectionService ?? createNetworkConnectionService();
-    _profileRepository = const NetworkProfileRepository();
+    _profileRepository = widget.profileRepository ?? NetworkProfileRepository();
+    _profileBackupCodec = widget.profileBackupCodec ?? ProfileBackupCodec();
+    _profileTransferFileService =
+        widget.profileTransferFileService ??
+        const PlatformProfileTransferFileService();
     _loadNetworkProfiles();
   }
 
@@ -528,9 +540,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodyMedium
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.w600,
-                                        ),
+                                        ?.copyWith(fontWeight: FontWeight.w600),
                                   ),
                                   Text(
                                     profile.ssid,
@@ -599,122 +609,21 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   }
 
   Future<void> _showProfileEditor(NetworkProfile? existing) async {
-    final nameController = TextEditingController(
-      text: existing?.displayName ?? '',
-    );
-    final ssidController = TextEditingController(text: existing?.ssid ?? '');
-    final passwordController = TextEditingController(
-      text: existing?.password ?? '',
-    );
-    var obscurePassword = true;
-    await showDialog<void>(
+    final profile = await showDialog<NetworkProfile>(
       context: context,
       barrierColor: Colors.black38,
-      builder: (dialogContext) {
-        return _TranslucentDialog(
-          child: StatefulBuilder(
-            builder: (dialogContext, setDialogState) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    existing == null ? '프로필 추가' : '프로필 편집',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: nameController,
-                    decoration: const InputDecoration(
-                      labelText: '표시 이름',
-                      hintText: '예: 거실 공유기 5G',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: ssidController,
-                    decoration: const InputDecoration(
-                      labelText: 'Wi-Fi 이름(SSID)',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: passwordController,
-                    obscureText: obscurePassword,
-                    decoration: InputDecoration(
-                      labelText: 'Wi-Fi 암호',
-                      suffixIcon: IconButton(
-                        onPressed: () => setDialogState(
-                          () => obscurePassword = !obscurePassword,
-                        ),
-                        icon: Icon(
-                          obscurePassword
-                              ? Icons.visibility_outlined
-                              : Icons.visibility_off_outlined,
-                          size: 20,
-                        ),
-                        tooltip: obscurePassword ? '암호 표시' : '암호 숨기기',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '암호는 암호화되어 이 기기에만 저장됩니다.',
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                  const SizedBox(height: 18),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                        child: const Text('취소'),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: () async {
-                          final ssid = ssidController.text.trim();
-                          if (ssid.isEmpty) return;
-                          final name = nameController.text.trim();
-                          final password = passwordController.text;
-                          final profile = NetworkProfile(
-                            id: ssid,
-                            ssid: ssid,
-                            displayName: name.isEmpty ? ssid : name,
-                            password: password.isEmpty
-                                ? existing?.password
-                                : password,
-                          );
-                          final merged = [
-                            ..._networkProfiles.where(
-                              (item) =>
-                                  item.ssid != ssid &&
-                                  item.id != existing?.id,
-                            ),
-                            profile,
-                          ];
-                          await _profileRepository.save(merged);
-                          if (mounted) {
-                            setState(() => _networkProfiles = merged);
-                          }
-                          if (dialogContext.mounted) {
-                            Navigator.of(dialogContext).pop();
-                          }
-                        },
-                        child: const Text('저장'),
-                      ),
-                    ],
-                  ),
-                ],
-              );
-            },
-          ),
-        );
-      },
+      builder: (dialogContext) => _ProfileEditorDialog(existing: existing),
     );
-    nameController.dispose();
-    ssidController.dispose();
-    passwordController.dispose();
+    if (profile == null) return;
+    final merged = [
+      ..._networkProfiles.where(
+        (item) => item.ssid != profile.ssid && item.id != existing?.id,
+      ),
+      profile,
+    ];
+    await _profileRepository.save(merged);
+    if (!mounted) return;
+    setState(() => _networkProfiles = merged);
   }
 
   Future<bool?> _showAndroidPermissionRationale() {
@@ -1231,7 +1140,8 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '저장된 Wi-Fi 프로필을 파일로 내보내거나 불러옵니다. 암호는 암호화되어 저장됩니다.',
+                    '저장된 Wi-Fi 프로필을 파일로 내보내거나 불러옵니다. '
+                    '내보내기 파일은 입력한 암호로 암호화됩니다.',
                     style: Theme.of(context).textTheme.labelSmall,
                   ),
                   const SizedBox(height: 18),
@@ -1259,19 +1169,15 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       });
       return;
     }
+    final password = await _askProfileBackupPassword(confirm: true);
+    if (password == null) return;
     try {
-      final content = await _profileRepository.encode(_networkProfiles);
-      final path = await FilePicker.saveFile(
-        dialogTitle: '네트워크 프로필 내보내기',
-        fileName: 'wifiscan_profiles.json',
-        type: FileType.custom,
-        allowedExtensions: const ['json'],
-        bytes: utf8.encode(content),
+      final content = await _profileBackupCodec.exportProfiles(
+        _networkProfiles,
+        password: password,
       );
-      if (path == null) return;
-      if (!io.Platform.isAndroid && !io.Platform.isIOS) {
-        await io.File(path).writeAsString(content, flush: true);
-      }
+      final saved = await _profileTransferFileService.save(content);
+      if (!saved) return;
       if (!mounted) return;
       setState(() {
         _message = '네트워크 프로필 ${_networkProfiles.length}개를 내보냈습니다.';
@@ -1288,24 +1194,14 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
 
   Future<void> _importProfiles() async {
     try {
-      final result = await FilePicker.pickFiles(
-        dialogTitle: '네트워크 프로필 가져오기',
-        type: FileType.custom,
-        allowedExtensions: const ['json'],
+      final content = await _profileTransferFileService.pick();
+      if (content == null || !mounted) return;
+      final password = await _askProfileBackupPassword(confirm: false);
+      if (password == null) return;
+      final imported = await _profileBackupCodec.importProfiles(
+        content,
+        password: password,
       );
-      final path = result?.files.single.path;
-      if (path == null) return;
-      final imported = await _profileRepository.decode(
-        await io.File(path).readAsString(),
-      );
-      if (imported.isEmpty) {
-        if (!mounted) return;
-        setState(() {
-          _message = '가져올 프로필이 없거나 파일 형식이 올바르지 않습니다.';
-          _messageIsError = true;
-        });
-        return;
-      }
       final merged = {
         for (final profile in _networkProfiles) profile.ssid: profile,
       };
@@ -1320,6 +1216,12 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         _message = '네트워크 프로필 ${imported.length}개를 가져왔습니다.';
         _messageIsError = false;
       });
+    } on ProfileBackupException {
+      if (!mounted) return;
+      setState(() {
+        _message = '암호가 올바르지 않거나 파일이 손상되었습니다.';
+        _messageIsError = true;
+      });
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -1327,6 +1229,14 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         _messageIsError = true;
       });
     }
+  }
+
+  Future<String?> _askProfileBackupPassword({required bool confirm}) {
+    return showDialog<String>(
+      context: context,
+      barrierColor: Colors.black38,
+      builder: (_) => _ProfileBackupPasswordDialog(confirm: confirm),
+    );
   }
 
   Future<void> _openRemediationPlan(RemediationPlan plan) async {
@@ -1504,6 +1414,243 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
+class _ProfileEditorDialog extends StatefulWidget {
+  const _ProfileEditorDialog({required this.existing});
+
+  final NetworkProfile? existing;
+
+  @override
+  State<_ProfileEditorDialog> createState() => _ProfileEditorDialogState();
+}
+
+class _ProfileEditorDialogState extends State<_ProfileEditorDialog> {
+  late final TextEditingController _nameController;
+  late final TextEditingController _ssidController;
+  late final TextEditingController _passwordController;
+  bool _obscurePassword = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(
+      text: widget.existing?.displayName ?? '',
+    );
+    _ssidController = TextEditingController(text: widget.existing?.ssid ?? '');
+    _passwordController = TextEditingController(
+      text: widget.existing?.password ?? '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _ssidController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final ssid = _ssidController.text.trim();
+    if (ssid.isEmpty) return;
+    final name = _nameController.text.trim();
+    final password = _passwordController.text;
+    Navigator.of(context).pop(
+      NetworkProfile(
+        id: ssid,
+        ssid: ssid,
+        displayName: name.isEmpty ? ssid : name,
+        password: password.isEmpty ? widget.existing?.password : password,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _TranslucentDialog(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.existing == null ? '프로필 추가' : '프로필 편집',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _nameController,
+            decoration: const InputDecoration(
+              labelText: '표시 이름',
+              hintText: '예: 거실 공유기 5G',
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _ssidController,
+            decoration: const InputDecoration(labelText: 'Wi-Fi 이름(SSID)'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _passwordController,
+            obscureText: _obscurePassword,
+            decoration: InputDecoration(
+              labelText: 'Wi-Fi 암호',
+              suffixIcon: IconButton(
+                onPressed: () {
+                  setState(() => _obscurePassword = !_obscurePassword);
+                },
+                icon: Icon(
+                  _obscurePassword
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                  size: 20,
+                ),
+                tooltip: _obscurePassword ? '암호 표시' : '암호 숨기기',
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '암호는 운영체제 보안 저장소에 저장됩니다.',
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+          const SizedBox(height: 18),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('취소'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(onPressed: _save, child: const Text('저장')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileBackupPasswordDialog extends StatefulWidget {
+  const _ProfileBackupPasswordDialog({required this.confirm});
+
+  final bool confirm;
+
+  @override
+  State<_ProfileBackupPasswordDialog> createState() =>
+      _ProfileBackupPasswordDialogState();
+}
+
+class _ProfileBackupPasswordDialogState
+    extends State<_ProfileBackupPasswordDialog> {
+  late final TextEditingController _passwordController;
+  late final TextEditingController _confirmationController;
+  bool _obscurePassword = true;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _passwordController = TextEditingController();
+    _confirmationController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    _confirmationController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final password = _passwordController.text;
+    if (password.length < ProfileBackupCodec.minimumPasswordLength) {
+      setState(() => _errorText = '암호는 8자 이상이어야 합니다.');
+      return;
+    }
+    if (widget.confirm && password != _confirmationController.text) {
+      setState(() => _errorText = '입력한 암호가 서로 다릅니다.');
+      return;
+    }
+    Navigator.of(context).pop(password);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _TranslucentDialog(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.confirm ? '내보내기 암호 설정' : '내보내기 암호 입력',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            widget.confirm
+                ? '이 암호는 파일을 불러올 때 필요하며 앱에는 저장되지 않습니다.'
+                : '파일을 내보낼 때 사용한 암호를 입력하세요.',
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            key: const ValueKey('profile-backup-password'),
+            controller: _passwordController,
+            obscureText: _obscurePassword,
+            autofocus: true,
+            textInputAction: widget.confirm
+                ? TextInputAction.next
+                : TextInputAction.done,
+            onSubmitted: widget.confirm ? null : (_) => _submit(),
+            decoration: InputDecoration(
+              labelText: '내보내기 암호',
+              helperText: '8자 이상',
+              errorText: _errorText,
+              suffixIcon: IconButton(
+                onPressed: () {
+                  setState(() => _obscurePassword = !_obscurePassword);
+                },
+                icon: Icon(
+                  _obscurePassword
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                ),
+                tooltip: _obscurePassword ? '암호 표시' : '암호 숨기기',
+              ),
+            ),
+          ),
+          if (widget.confirm) ...[
+            const SizedBox(height: 10),
+            TextField(
+              key: const ValueKey('profile-backup-password-confirmation'),
+              controller: _confirmationController,
+              obscureText: _obscurePassword,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
+              decoration: const InputDecoration(labelText: '암호 확인'),
+            ),
+          ],
+          const SizedBox(height: 18),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('취소'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: _submit,
+                child: Text(widget.confirm ? '내보내기' : '불러오기'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _TranslucentDialog extends StatelessWidget {
   const _TranslucentDialog({required this.child});
 
@@ -1512,24 +1659,35 @@ class _TranslucentDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final media = MediaQuery.of(context);
+    final maxHeight = (media.size.height - media.viewInsets.bottom - 48)
+        .clamp(200.0, 680.0)
+        .toDouble();
     return Dialog(
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-          child: Container(
-            width: 420,
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: scheme.surface.withValues(alpha: 0.78),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: scheme.outlineVariant.withValues(alpha: 0.6),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: 420, maxHeight: maxHeight),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: scheme.surface.withValues(alpha: 0.78),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: scheme.outlineVariant.withValues(alpha: 0.6),
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(child: SingleChildScrollView(child: child)),
+                ],
               ),
             ),
-            child: SingleChildScrollView(child: child),
           ),
         ),
       ),
@@ -1774,9 +1932,7 @@ class _DeviceControlBar extends StatelessWidget {
                     ),
               isDense: true,
               filled: true,
-              fillColor: scheme.surfaceContainerHighest.withValues(
-                alpha: 0.55,
-              ),
+              fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
                 borderSide: BorderSide.none,
@@ -2359,89 +2515,88 @@ class _MeshNetworkView extends StatelessWidget {
 
   Widget _content(BuildContext context) {
     return LayoutBuilder(
-          builder: (context, constraints) {
-            final viewHeight = constraints.maxHeight.isFinite
-                ? constraints.maxHeight
-                : 440.0;
-            final center = Offset(constraints.maxWidth / 2, viewHeight / 2);
-            final positions = <String, Offset>{};
-            final local = devices.cast<NetworkDevice?>().firstWhere(
-              (device) =>
-                  device!.sources.contains(DiscoverySource.localInterface),
-              orElse: () => null,
-            );
-            if (local != null) positions[local.id] = center;
-            final others = devices
-                .where((device) => device != local)
-                .toList(growable: false);
-            final radiusBase = math.min(constraints.maxWidth, 360.0);
-            for (var index = 0; index < others.length; index++) {
-              final hash = others[index].id.codeUnits.fold<int>(
-                0,
-                (sum, item) => sum + item,
-              );
-              final angle = (index * 2.399963) + (hash % 31) / 100;
-              final distance = radiusBase * (0.24 + (hash % 23) / 100);
-              positions[others[index].id] = Offset(
-                center.dx + math.cos(angle) * distance,
-                center.dy + math.sin(angle) * distance,
-              );
-            }
-            return Stack(
-              children: [
-                Positioned.fill(
-                  child: InteractiveViewer(
-                    boundaryMargin: const EdgeInsets.all(100),
-                    minScale: 0.75,
-                    maxScale: 2.5,
-                    child: SizedBox(
-                      width: constraints.maxWidth,
-                      height: viewHeight,
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: CustomPaint(
-                              painter: _MeshNetworkPainter(
-                                positions: positions,
-                                center: center,
-                                scheme: Theme.of(context).colorScheme,
-                              ),
+      builder: (context, constraints) {
+        final viewHeight = constraints.maxHeight.isFinite
+            ? constraints.maxHeight
+            : 440.0;
+        final center = Offset(constraints.maxWidth / 2, viewHeight / 2);
+        final positions = <String, Offset>{};
+        final local = devices.cast<NetworkDevice?>().firstWhere(
+          (device) => device!.sources.contains(DiscoverySource.localInterface),
+          orElse: () => null,
+        );
+        if (local != null) positions[local.id] = center;
+        final others = devices
+            .where((device) => device != local)
+            .toList(growable: false);
+        final radiusBase = math.min(constraints.maxWidth, 360.0);
+        for (var index = 0; index < others.length; index++) {
+          final hash = others[index].id.codeUnits.fold<int>(
+            0,
+            (sum, item) => sum + item,
+          );
+          final angle = (index * 2.399963) + (hash % 31) / 100;
+          final distance = radiusBase * (0.24 + (hash % 23) / 100);
+          positions[others[index].id] = Offset(
+            center.dx + math.cos(angle) * distance,
+            center.dy + math.sin(angle) * distance,
+          );
+        }
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: InteractiveViewer(
+                boundaryMargin: const EdgeInsets.all(100),
+                minScale: 0.75,
+                maxScale: 2.5,
+                child: SizedBox(
+                  width: constraints.maxWidth,
+                  height: viewHeight,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: CustomPaint(
+                          painter: _MeshNetworkPainter(
+                            positions: positions,
+                            center: center,
+                            scheme: Theme.of(context).colorScheme,
+                          ),
+                        ),
+                      ),
+                      for (final device in devices)
+                        if (positions[device.id] != null)
+                          Positioned(
+                            left: positions[device.id]!.dx - 34,
+                            top: positions[device.id]!.dy - 34,
+                            child: _TopologyNode(
+                              device: device,
+                              isNew: newDeviceIds.contains(device.id),
+                              onTap: () => onDeviceTap(device),
                             ),
                           ),
-                          for (final device in devices)
-                            if (positions[device.id] != null)
-                              Positioned(
-                                left: positions[device.id]!.dx - 34,
-                                top: positions[device.id]!.dy - 34,
-                                child: _TopologyNode(
-                                  device: device,
-                                  isNew: newDeviceIds.contains(device.id),
-                                  onTap: () => onDeviceTap(device),
-                                ),
-                              ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  left: 16,
-                  top: 14,
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.hub_outlined,
-                        size: 18,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      const SizedBox(width: 8),
-                      const Text('메시 보기'),
                     ],
                   ),
                 ),
-              ],
-            );
-          },
+              ),
+            ),
+            Positioned(
+              left: 16,
+              top: 14,
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.hub_outlined,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  const Text('메시 보기'),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
