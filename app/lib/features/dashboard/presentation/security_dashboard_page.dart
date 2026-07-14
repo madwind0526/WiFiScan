@@ -18,6 +18,8 @@ import 'package:wifi_scan/features/network_profiles/application/network_profile_
 import 'package:wifi_scan/features/network_profiles/domain/network_profile.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/platform_network_connection_service.dart';
 
+const String _buildVersion = 'v1.0.0';
+
 enum _DashboardSection { overview, networks, devices, findings }
 
 enum _DashboardView { mesh, cards, list }
@@ -677,7 +679,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                 ),
                 Expanded(
                   child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 112),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                     children: _mainChildren(context),
                   ),
                 ),
@@ -687,13 +689,6 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         ),
       ),
       bottomNavigationBar: _buildBottomNavigation(context),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-      floatingActionButton: FloatingActionButton(
-        onPressed: _isScanning ? _cancelScan : _startScan,
-        tooltip: _isScanning ? '검색 중지 요청' : '현재 네트워크 검색 시작',
-        shape: const CircleBorder(),
-        child: Icon(_isScanning ? Icons.stop_rounded : Icons.radar),
-      ),
     );
   }
 
@@ -707,21 +702,14 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   }
 
   List<Widget> _homeMainChildren(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final subtitle = [
-      if (_currentSsid != null && _currentSsid!.isNotEmpty) _currentSsid!,
-      if (_lastResult != null) _lastResult!.context.scannedSubnet,
-    ].join(' · ');
+    final network = _lastResult?.context;
+    final footerText = network == null
+        ? '스캔 후 인터페이스, 게이트웨이, 검색 범위가 표시됩니다.'
+        : '${network.interfaceName} · ${network.ipv4Address} · '
+              'GW ${network.gateway} · ${network.scannedSubnet}';
     return [
-      const SizedBox(height: 8),
-      Text('내 네트워크', style: Theme.of(context).textTheme.headlineSmall),
-      const SizedBox(height: 4),
-      Text(
-        subtitle.isEmpty ? '스캔을 시작하면 연결된 장비가 표시됩니다.' : subtitle,
-        style: Theme.of(
-          context,
-        ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-      ),
+      const SizedBox(height: 10),
+      Center(child: _CurrentNetworkChip(ssid: _currentSsid)),
       const SizedBox(height: 14),
       _SummaryPanel(
         deviceCount: _overview.devices.length,
@@ -746,21 +734,17 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
           textAlign: TextAlign.center,
         ),
       ],
-      const SizedBox(height: 16),
-      if (_overview.devices.isNotEmpty)
-        _MeshNetworkView(
-          devices: _filteredDevices,
-          newDeviceIds: _newDeviceIds,
-          onDeviceTap: _showDeviceDetails,
-        )
-      else
-        _EmptyPanel(
-          icon: Icons.radar,
-          title: '아직 스캔 결과가 없습니다.',
-          description: '하단의 스캔 버튼을 눌러 현재 Wi-Fi 장비를 확인하세요.',
-        ),
-      const SizedBox(height: 16),
-      _NetworkContextCard(context: _lastResult?.context),
+      const SizedBox(height: 14),
+      _MainWindowBox(
+        footerText: footerText,
+        child: _overview.devices.isNotEmpty
+            ? _MeshNetworkView(
+                devices: _filteredDevices,
+                newDeviceIds: _newDeviceIds,
+                onDeviceTap: _showDeviceDetails,
+              )
+            : const _EmptyState(),
+      ),
     ];
   }
 
@@ -975,46 +959,60 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   Widget _buildBottomNavigation(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      height: 66,
+      height: 72,
       decoration: BoxDecoration(
         color: scheme.surface,
         border: Border(top: BorderSide(color: scheme.outlineVariant)),
       ),
-      child: MediaQuery.withClampedTextScaling(
-        maxScaleFactor: 1.3,
-        child: Row(
-          children: [
-            _NavItem(
-              icon: Icons.home_outlined,
-              label: '홈',
-              selected: _section == _DashboardSection.overview,
-              onTap: () =>
-                  setState(() => _section = _DashboardSection.overview),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          _NavItem(
+            icon: Icons.home_outlined,
+            tooltip: '홈',
+            selected: _section == _DashboardSection.overview,
+            onTap: () => setState(() => _section = _DashboardSection.overview),
+          ),
+          _NavItem(
+            icon: Icons.wifi,
+            tooltip: '네트워크',
+            selected: _section == _DashboardSection.networks,
+            onTap: () => setState(() => _section = _DashboardSection.networks),
+          ),
+          Expanded(
+            child: Tooltip(
+              message: _isScanning ? '검색 중지 요청' : '현재 네트워크 검색 시작',
+              child: InkWell(
+                onTap: _isScanning ? _cancelScan : _startScan,
+                child: SizedBox.expand(
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Icon(
+                        _isScanning ? Icons.stop_rounded : Icons.radar,
+                        size: 48,
+                        color: scheme.primary,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
-            _NavItem(
-              icon: Icons.wifi,
-              label: '네트워크',
-              selected: _section == _DashboardSection.networks,
-              onTap: () =>
-                  setState(() => _section = _DashboardSection.networks),
-            ),
-            const SizedBox(width: 76),
-            _NavItem(
-              icon: Icons.devices_other,
-              label: '장비',
-              selected: _section == _DashboardSection.devices,
-              onTap: () =>
-                  setState(() => _section = _DashboardSection.devices),
-            ),
-            _NavItem(
-              icon: Icons.shield_outlined,
-              label: '경고',
-              selected: _section == _DashboardSection.findings,
-              onTap: () =>
-                  setState(() => _section = _DashboardSection.findings),
-            ),
-          ],
-        ),
+          ),
+          _NavItem(
+            icon: Icons.devices_other,
+            tooltip: '장비',
+            selected: _section == _DashboardSection.devices,
+            onTap: () => setState(() => _section = _DashboardSection.devices),
+          ),
+          _NavItem(
+            icon: Icons.shield_outlined,
+            tooltip: '경고',
+            selected: _section == _DashboardSection.findings,
+            onTap: () => setState(() => _section = _DashboardSection.findings),
+          ),
+        ],
       ),
     );
   }
@@ -1279,14 +1277,29 @@ class _TopBar extends StatelessWidget {
             Icon(Icons.wifi_tethering, color: scheme.primary, size: 22),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                'WifiScan',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.4,
-                ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'WifiScan',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  Text(
+                    _buildVersion,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      fontSize: 10,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
             ),
             IconButton(
@@ -1317,13 +1330,13 @@ class _TopBar extends StatelessWidget {
 class _NavItem extends StatelessWidget {
   const _NavItem({
     required this.icon,
-    required this.label,
+    required this.tooltip,
     required this.selected,
     required this.onTap,
   });
 
   final IconData icon;
-  final String label;
+  final String tooltip;
   final bool selected;
   final VoidCallback onTap;
 
@@ -1332,22 +1345,19 @@ class _NavItem extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final color = selected ? scheme.primary : scheme.onSurfaceVariant;
     return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 22, color: color),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: color,
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox.expand(
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Icon(icon, size: 24, color: color),
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -1627,6 +1637,113 @@ class _NetworkRow extends StatelessWidget {
   }
 }
 
+class _CurrentNetworkChip extends StatelessWidget {
+  const _CurrentNetworkChip({required this.ssid});
+
+  final String? ssid;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final background = isDark
+        ? const Color(0xFF2E3038)
+        : const Color(0xFFE4E4EA);
+    final connected = ssid != null && ssid!.isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: MediaQuery.withClampedTextScaling(
+        maxScaleFactor: 1.3,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              connected ? Icons.wifi : Icons.wifi_off,
+              size: 16,
+              color: connected ? scheme.primary : scheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                connected ? ssid! : '연결된 네트워크 없음',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MainWindowBox extends StatelessWidget {
+  const _MainWindowBox({required this.child, required this.footerText});
+
+  final Widget child;
+  final String footerText;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final background = isDark
+        ? const Color(0xFF1E2029)
+        : const Color(0xFFEFEFF4);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          child,
+          const SizedBox(height: 10),
+          Text(
+            footerText,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              fontSize: 10,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: 380,
+      child: Center(
+        child: Text(
+          'Empty',
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.2,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SummaryPanel extends StatelessWidget {
   const _SummaryPanel({
     required this.deviceCount,
@@ -1656,7 +1773,7 @@ class _SummaryPanel extends StatelessWidget {
               child: _SummaryValue(
                 icon: Icons.devices_other,
                 value: '$deviceCount',
-                label: '연결 장비',
+                tooltip: '연결 장비',
               ),
             ),
             Expanded(
@@ -1665,7 +1782,7 @@ class _SummaryPanel extends StatelessWidget {
                     ? Icons.verified_user_outlined
                     : Icons.warning_amber,
                 value: '$warningCount',
-                label: '보안 경고',
+                tooltip: '보안 경고',
                 color: warningCount == 0 ? scheme.primary : scheme.error,
               ),
             ),
@@ -1676,7 +1793,7 @@ class _SummaryPanel extends StatelessWidget {
                 child: _SummaryValue(
                   icon: isScanning ? Icons.radar : Icons.wifi,
                   value: '$scannedNetworkCount/$networkCount',
-                  label: '네트워크',
+                  tooltip: '네트워크',
                   color: isScanning ? scheme.tertiary : scheme.primary,
                 ),
               ),
@@ -1692,25 +1809,27 @@ class _SummaryValue extends StatelessWidget {
   const _SummaryValue({
     required this.icon,
     required this.value,
-    required this.label,
+    required this.tooltip,
     this.color,
   });
 
   final IconData icon;
   final String value;
-  final String label;
+  final String tooltip;
   final Color? color;
 
   @override
   Widget build(BuildContext context) {
     final iconColor = color ?? Theme.of(context).colorScheme.primary;
-    return Column(
-      children: [
-        Icon(icon, color: iconColor, size: 22),
-        const SizedBox(height: 6),
-        Text(value, style: Theme.of(context).textTheme.titleMedium),
-        Text(label, style: Theme.of(context).textTheme.labelSmall),
-      ],
+    return Tooltip(
+      message: tooltip,
+      child: Column(
+        children: [
+          Icon(icon, color: iconColor, size: 33),
+          const SizedBox(height: 6),
+          Text(value, style: Theme.of(context).textTheme.titleMedium),
+        ],
+      ),
     );
   }
 }

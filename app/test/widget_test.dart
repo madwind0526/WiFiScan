@@ -14,13 +14,14 @@ void main() {
   testWidgets('shows the network security dashboard', (tester) async {
     await tester.pumpWidget(const WifiScanApp());
 
-    expect(find.text('내 네트워크'), findsOneWidget);
     expect(find.text('WifiScan'), findsOneWidget);
+    expect(find.text('v1.0.0'), findsOneWidget);
+    expect(find.text('Empty'), findsOneWidget);
     expect(find.byTooltip('설정'), findsOneWidget);
     expect(find.byTooltip('전체 네트워크 스캔'), findsOneWidget);
     expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);
-    expect(find.text('네트워크'), findsWidgets);
-    expect(find.text('경고'), findsOneWidget);
+    expect(find.byTooltip('네트워크'), findsWidgets);
+    expect(find.byTooltip('경고'), findsOneWidget);
   });
 
   testWidgets('shows discovered devices after a completed scan', (
@@ -38,7 +39,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('검색이 완료되었습니다.'), findsOneWidget);
-    await tester.tap(find.text('장비'));
+    await tester.tap(find.byTooltip('장비'));
     await tester.pumpAndSettle();
     expect(find.text('메시 보기'), findsOneWidget);
     expect(find.text('장비 검색'), findsOneWidget);
@@ -94,7 +95,7 @@ void main() {
     expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);
     await tester.tap(find.byTooltip('현재 네트워크 검색 시작'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('장비'));
+    await tester.tap(find.byTooltip('장비'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
