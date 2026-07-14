@@ -7,15 +7,19 @@ import 'package:wifi_scan/features/discovery/domain/network_context.dart';
 import 'package:wifi_scan/features/inventory/domain/network_device.dart';
 import 'package:wifi_scan/features/inventory/application/inventory_repository.dart';
 import 'package:wifi_scan/features/inventory/domain/inventory_snapshot.dart';
+import 'package:wifi_scan/features/network_profiles/application/network_connection_service.dart';
+import 'package:wifi_scan/features/network_profiles/domain/network_profile.dart';
 
 void main() {
   testWidgets('shows the network security dashboard', (tester) async {
     await tester.pumpWidget(const WifiScanApp());
 
     expect(find.text('내 네트워크'), findsOneWidget);
-    expect(find.text('장비 검색'), findsOneWidget);
+    expect(find.text('WifiScan'), findsOneWidget);
     expect(find.byTooltip('설정'), findsOneWidget);
+    expect(find.byTooltip('전체 네트워크 스캔'), findsOneWidget);
     expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);
+    expect(find.text('네트워크'), findsWidgets);
     expect(find.text('경고'), findsOneWidget);
   });
 
@@ -26,6 +30,7 @@ void main() {
       WifiScanApp(
         discoveryService: const _FakeDiscoveryService(),
         inventoryRepository: InventoryRepository(store: _MemorySnapshotStore()),
+        connectionService: const _FakeConnectionService(),
       ),
     );
 
@@ -36,7 +41,8 @@ void main() {
     await tester.tap(find.text('장비'));
     await tester.pumpAndSettle();
     expect(find.text('메시 보기'), findsOneWidget);
-    await tester.tap(find.text('목록'));
+    expect(find.text('장비 검색'), findsOneWidget);
+    await tester.tap(find.byTooltip('목록'));
     await tester.pumpAndSettle();
     expect(find.text('이 Windows 컴퓨터'), findsOneWidget);
     expect(find.text('기본 게이트웨이'), findsOneWidget);
@@ -49,7 +55,10 @@ void main() {
 
   testWidgets('allows the user to stop an active scan', (tester) async {
     await tester.pumpWidget(
-      const WifiScanApp(discoveryService: _SlowDiscoveryService()),
+      const WifiScanApp(
+        discoveryService: _SlowDiscoveryService(),
+        connectionService: _FakeConnectionService(),
+      ),
     );
 
     await tester.tap(find.byTooltip('현재 네트워크 검색 시작').first);
@@ -76,6 +85,7 @@ void main() {
       WifiScanApp(
         discoveryService: const _FakeDiscoveryService(),
         inventoryRepository: InventoryRepository(store: _MemorySnapshotStore()),
+        connectionService: const _FakeConnectionService(),
       ),
     );
     await tester.pumpAndSettle();
@@ -166,6 +176,22 @@ class _SlowDiscoveryService implements NetworkDiscoveryService {
     }
     throw const DiscoveryCancelledException();
   }
+}
+
+class _FakeConnectionService implements NetworkConnectionService {
+  const _FakeConnectionService();
+
+  @override
+  Future<List<NetworkProfile>> discoverAvailableProfiles() async => const [];
+
+  @override
+  Future<String?> currentSsid() async => null;
+
+  @override
+  Future<void> connect(NetworkProfile profile) async {}
+
+  @override
+  Future<void> restore(String? ssid) async {}
 }
 
 class _MemorySnapshotStore implements InventorySnapshotStore {

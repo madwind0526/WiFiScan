@@ -27,7 +27,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   // Start Windows with the same portrait canvas used by the mobile layout.
   Win32Window::Point origin(120, 40);
-  Win32Window::Size size(560, 900);
+  Win32Window::Size size(480, 920);
   if (!window.Create(L"와이파이 스캔", origin, size)) {
     return EXIT_FAILURE;
   }

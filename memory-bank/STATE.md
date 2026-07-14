@@ -2,10 +2,10 @@
 
 ## Current Wave
 
-- **Wave:** 6
+- **Wave:** 7
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-11 Wave 3~6 구현, 아이콘 중심 UI, Android APK/Windows 빌드와 자동 테스트 검증 완료
+- **Last Checkpoint:** 2026-07-14 Wave 7 세로형 아이콘 셸 리디자인, 네트워크 탭(공유기 그룹/밴드), 네트워크별 스캔 기록·필터, analyze/test/build 검증 완료
 
 ## Wave History
 
@@ -18,6 +18,7 @@
 | 4 | 근거 기반 위험 분석과 경고 | Done |
 | 5 | 공유기 커넥터와 승인 기반 방어 조치 | Done |
 | 6 | Android 권한/성능/회귀 검증 흐름 | Done |
+| 7 | 세로형 아이콘 셸 UI 리디자인과 네트워크 탭 | Done |
 
 ## Session Notes
 

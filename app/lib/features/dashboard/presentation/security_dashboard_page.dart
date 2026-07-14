@@ -18,9 +18,21 @@ import 'package:wifi_scan/features/network_profiles/application/network_profile_
 import 'package:wifi_scan/features/network_profiles/domain/network_profile.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/platform_network_connection_service.dart';
 
-enum _DashboardSection { overview, devices, findings }
+enum _DashboardSection { overview, networks, devices, findings }
 
 enum _DashboardView { mesh, cards, list }
+
+class _NetworkScanRecord {
+  const _NetworkScanRecord({
+    required this.deviceIds,
+    required this.scannedAt,
+    this.failed = false,
+  });
+
+  final Set<String> deviceIds;
+  final DateTime scannedAt;
+  final bool failed;
+}
 
 class SecurityDashboardPage extends StatefulWidget {
   const SecurityDashboardPage({
@@ -28,12 +40,14 @@ class SecurityDashboardPage extends StatefulWidget {
     this.discoveryService,
     this.inventoryRepository,
     this.securityRiskAnalyzer,
+    this.connectionService,
     this.onThemeModeChanged,
   });
 
   final NetworkDiscoveryService? discoveryService;
   final InventoryRepository? inventoryRepository;
   final SecurityRiskAnalyzer? securityRiskAnalyzer;
+  final NetworkConnectionService? connectionService;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
 
   @override
@@ -60,10 +74,13 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   _DashboardSection _section = _DashboardSection.overview;
   _DashboardView _view = _DashboardView.mesh;
   String _searchQuery = '';
-  ThemeMode _themeMode = ThemeMode.system;
+  ThemeMode _themeMode = ThemeMode.dark;
   List<NetworkProfile> _networkProfiles = const [];
   String? _selectedNetworkId;
   bool _isScanningAllNetworks = false;
+  final Map<String, _NetworkScanRecord> _networkScans = {};
+  String? _networkFilterId;
+  String? _currentSsid;
 
   @override
   void initState() {
@@ -75,7 +92,8 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         const InventoryRepository(store: FileInventorySnapshotStore());
     _securityRiskAnalyzer =
         widget.securityRiskAnalyzer ?? const SecurityRiskAnalyzer();
-    _connectionService = createNetworkConnectionService();
+    _connectionService =
+        widget.connectionService ?? createNetworkConnectionService();
     _profileRepository = const NetworkProfileRepository();
     _loadNetworkProfiles();
   }
@@ -94,10 +112,17 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     } catch (_) {
       // The profile list is optional and should not block the main dashboard.
     }
+    String? ssid;
+    try {
+      ssid = await _connectionService.currentSsid();
+    } catch (_) {
+      // The current SSID is informational only.
+    }
     if (!mounted) return;
     setState(() {
       _networkProfiles = profiles;
       _selectedNetworkId ??= profiles.isEmpty ? null : profiles.first.id;
+      _currentSsid = ssid;
     });
   }
 
@@ -127,6 +152,12 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         },
       );
       if (!mounted) return;
+      String? scannedSsid;
+      try {
+        scannedSsid = await _connectionService.currentSsid();
+      } catch (_) {
+        // Tagging the scan with its network is best-effort.
+      }
       InventoryUpdate? inventoryUpdate;
       var storageWarning = false;
       try {
@@ -145,7 +176,19 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                 )
                 .findings;
       final remediationPlans = const ManualRemediationPlanner().build(findings);
+      final matchedProfiles = scannedSsid == null
+          ? const <NetworkProfile>[]
+          : _networkProfiles
+                .where((profile) => profile.ssid == scannedSsid)
+                .toList(growable: false);
       setState(() {
+        if (scannedSsid != null) _currentSsid = scannedSsid;
+        if (matchedProfiles.isNotEmpty) {
+          _networkScans[matchedProfiles.first.id] = _NetworkScanRecord(
+            deviceIds: result.devices.map((device) => device.id).toSet(),
+            scannedAt: DateTime.now(),
+          );
+        }
         _overview = NetworkOverview(
           devices: devices,
           findings: findings,
@@ -244,10 +287,24 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                 .findings,
           );
           completedNetworks += 1;
+          _networkScans[profile.id] = _NetworkScanRecord(
+            deviceIds: result.devices.map((device) => device.id).toSet(),
+            scannedAt: DateTime.now(),
+          );
         } on NetworkConnectionException {
           failures += 1;
+          _networkScans[profile.id] = _NetworkScanRecord(
+            deviceIds: const {},
+            scannedAt: DateTime.now(),
+            failed: true,
+          );
         } on DiscoveryUnavailableException {
           failures += 1;
+          _networkScans[profile.id] = _NetworkScanRecord(
+            deviceIds: const {},
+            scannedAt: DateTime.now(),
+            failed: true,
+          );
         }
       }
       if (!mounted) return;
@@ -291,6 +348,120 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         setState(() {
           _isScanning = false;
           _isScanningAllNetworks = false;
+          _cancellationToken = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _scanNetwork(NetworkProfile profile) async {
+    if (_isScanning) return;
+    if (io.Platform.isAndroid) {
+      final shouldContinue = await _showAndroidPermissionRationale();
+      if (shouldContinue != true || !mounted) return;
+    }
+
+    final token = DiscoveryCancellationToken();
+    String? originalSsid;
+    try {
+      originalSsid = await _connectionService.currentSsid();
+    } catch (_) {
+      // Restoring the original network is best-effort.
+    }
+    final needsConnect = originalSsid != profile.ssid;
+    setState(() {
+      _isScanning = true;
+      _cancellationToken = token;
+      _selectedNetworkId = profile.id;
+      _progress = null;
+      _message = '${profile.displayName}에 연결하는 중입니다.';
+      _messageIsError = false;
+    });
+
+    try {
+      if (needsConnect) await _connectionService.connect(profile);
+      final result = await _discoveryService.discover(
+        cancellationToken: token,
+        onProgress: (progress) {
+          if (!mounted) return;
+          setState(() => _progress = progress);
+        },
+      );
+      if (!mounted) return;
+      final update = await _inventoryRepository.record(result);
+      final analyzed = _securityRiskAnalyzer.analyze(
+        snapshot: update.snapshot,
+        inventoryUpdate: update,
+      );
+      final plans = const ManualRemediationPlanner().build(analyzed.findings);
+      setState(() {
+        _networkScans[profile.id] = _NetworkScanRecord(
+          deviceIds: result.devices.map((device) => device.id).toSet(),
+          scannedAt: DateTime.now(),
+        );
+        _overview = NetworkOverview(
+          devices: update.snapshot.devices,
+          findings: analyzed.findings,
+          lastScannedAt: DateTime.now(),
+          newDeviceCount: update.newDevices.length,
+        );
+        _lastResult = result;
+        _newDeviceIds = update.newDevices.map((device) => device.id).toSet();
+        _remediationPlans = plans;
+        _hasCompletedScan = true;
+        _securityAnalysisCompleted = true;
+        _message = '${profile.displayName} 검색을 완료했습니다.';
+        _messageIsError = false;
+      });
+    } on DiscoveryCancelledException {
+      if (mounted) {
+        setState(() {
+          _message = '검색을 중지했습니다.';
+          _messageIsError = false;
+        });
+      }
+    } on NetworkConnectionException catch (error) {
+      if (mounted) {
+        setState(() {
+          _networkScans[profile.id] = _NetworkScanRecord(
+            deviceIds: const {},
+            scannedAt: DateTime.now(),
+            failed: true,
+          );
+          _message = error.message;
+          _messageIsError = true;
+        });
+      }
+    } on DiscoveryUnavailableException catch (error) {
+      if (mounted) {
+        setState(() {
+          _message = error.message;
+          _messageIsError = true;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _message = '네트워크 정보를 읽지 못했습니다. 잠시 후 다시 시도하세요.';
+          _messageIsError = true;
+        });
+      }
+    } finally {
+      if (needsConnect) {
+        try {
+          await _connectionService.restore(originalSsid);
+        } catch (_) {
+          if (mounted) {
+            setState(() {
+              _message = '검색은 끝났지만 원래 Wi-Fi로 자동 복원하지 못했습니다.';
+              _messageIsError = true;
+            });
+          }
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _isScanning = false;
           _cancellationToken = null;
         });
       }
@@ -496,22 +667,17 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
             constraints: const BoxConstraints(maxWidth: 560),
             child: Column(
               children: [
-                _TopControlBar(
-                  query: _searchQuery,
-                  view: _view,
-                  networkCount: _networkProfiles.length,
-                  onQueryChanged: (value) =>
-                      setState(() => _searchQuery = value.trim()),
-                  onViewChanged: (view) => setState(() {
-                    _view = view;
-                    _section = _DashboardSection.devices;
-                  }),
-                  onSettings: _showSettingsSheet,
+                _TopBar(
+                  isScanning: _isScanning,
+                  onScanAll: _networkProfiles.isEmpty || _isScanning
+                      ? null
+                      : _scanAllNetworks,
                   onNetworks: _showNetworkProfiles,
+                  onSettings: _showSettingsSheet,
                 ),
                 Expanded(
                   child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 112),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 112),
                     children: _mainChildren(context),
                   ),
                 ),
@@ -522,11 +688,11 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       ),
       bottomNavigationBar: _buildBottomNavigation(context),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: FloatingActionButton(
         onPressed: _isScanning ? _cancelScan : _startScan,
-        icon: Icon(_isScanning ? Icons.stop_rounded : Icons.radar),
-        label: Text(_isScanning ? '중지' : '스캔'),
         tooltip: _isScanning ? '검색 중지 요청' : '현재 네트워크 검색 시작',
+        shape: const CircleBorder(),
+        child: Icon(_isScanning ? Icons.stop_rounded : Icons.radar),
       ),
     );
   }
@@ -534,6 +700,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   List<Widget> _mainChildren(BuildContext context) {
     return switch (_section) {
       _DashboardSection.overview => _homeMainChildren(context),
+      _DashboardSection.networks => _networksChildren(context),
       _DashboardSection.devices => _deviceMainChildren(context),
       _DashboardSection.findings => _findingsChildren(context),
     };
@@ -541,30 +708,31 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
 
   List<Widget> _homeMainChildren(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final subtitle = [
+      if (_currentSsid != null && _currentSsid!.isNotEmpty) _currentSsid!,
+      if (_lastResult != null) _lastResult!.context.scannedSubnet,
+    ].join(' · ');
     return [
       const SizedBox(height: 8),
       Text('내 네트워크', style: Theme.of(context).textTheme.headlineSmall),
       const SizedBox(height: 4),
       Text(
-        _lastResult?.context.scannedSubnet ?? '스캔을 시작하면 연결된 장비가 표시됩니다.',
+        subtitle.isEmpty ? '스캔을 시작하면 연결된 장비가 표시됩니다.' : subtitle,
         style: Theme.of(
           context,
         ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
       ),
       const SizedBox(height: 14),
-      _NetworkProfilePanel(
-        profiles: _networkProfiles,
-        selectedId: _selectedNetworkId,
-        isScanning: _isScanningAllNetworks,
-        onManage: _showNetworkProfiles,
-        onScanAll: _scanAllNetworks,
-      ),
-      const SizedBox(height: 18),
       _SummaryPanel(
         deviceCount: _overview.devices.length,
         warningCount: _overview.findings.length,
+        networkCount: _networkProfiles.length,
+        scannedNetworkCount: _networkScans.values
+            .where((record) => !record.failed)
+            .length,
         isScanning: _isScanning,
-        message: _message,
+        onNetworksTap: () =>
+            setState(() => _section = _DashboardSection.networks),
       ),
       if (_message != null) ...[
         const SizedBox(height: 12),
@@ -596,22 +764,125 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     ];
   }
 
+  List<Widget> _networksChildren(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final groups = <String, List<NetworkProfile>>{};
+    for (final profile in _networkProfiles) {
+      groups.putIfAbsent(_routerGroupName(profile.ssid), () => []).add(profile);
+    }
+    return [
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              '네트워크',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+          ),
+          IconButton(
+            onPressed: _showNetworkProfiles,
+            icon: const Icon(Icons.tune),
+            tooltip: '네트워크 프로필 관리',
+          ),
+        ],
+      ),
+      const SizedBox(height: 4),
+      Text(
+        _networkProfiles.isEmpty
+            ? '접속 가능한 Wi-Fi 프로필을 추가하면 여기에 표시됩니다.'
+            : '공유기 ${groups.length}대 · Wi-Fi ${_networkProfiles.length}개',
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+      ),
+      const SizedBox(height: 14),
+      SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: _networkProfiles.isEmpty || _isScanning
+              ? null
+              : _scanAllNetworks,
+          icon: Icon(
+            _isScanningAllNetworks ? Icons.sync : Icons.travel_explore,
+          ),
+          label: Text(_isScanningAllNetworks ? '전체 네트워크 검색 중' : '전체 네트워크 스캔'),
+        ),
+      ),
+      if (_message != null) ...[
+        const SizedBox(height: 12),
+        _MessagePanel(message: _message!, isError: _messageIsError),
+      ],
+      if (_isScanning && _progress != null) ...[
+        const SizedBox(height: 10),
+        Text(
+          _progressLabel(_progress),
+          style: Theme.of(context).textTheme.labelMedium,
+          textAlign: TextAlign.center,
+        ),
+      ],
+      const SizedBox(height: 16),
+      if (_networkProfiles.isEmpty)
+        _EmptyPanel(
+          icon: Icons.wifi_find,
+          title: '등록된 네트워크가 없습니다.',
+          description: '오른쪽 위의 관리 버튼으로 SSID와 암호를 추가하세요.',
+        )
+      else
+        for (final entry in groups.entries) ...[
+          _RouterGroupCard(
+            groupName: entry.key,
+            profiles: entry.value,
+            currentSsid: _currentSsid,
+            scans: _networkScans,
+            isScanning: _isScanning,
+            onScan: _scanNetwork,
+            onShowDevices: (profile) => setState(() {
+              _networkFilterId = profile.id;
+              _section = _DashboardSection.devices;
+            }),
+          ),
+          const SizedBox(height: 12),
+        ],
+    ];
+  }
+
   List<Widget> _deviceMainChildren(BuildContext context) {
     final devices = _filteredDevices;
+    final header = [
+      const SizedBox(height: 8),
+      _DeviceControlBar(
+        query: _searchQuery,
+        view: _view,
+        onQueryChanged: (value) => setState(() => _searchQuery = value.trim()),
+        onViewChanged: (view) => setState(() => _view = view),
+      ),
+      if (_networkScans.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        _NetworkFilterChips(
+          profiles: _networkProfiles
+              .where((profile) => _networkScans.containsKey(profile.id))
+              .toList(growable: false),
+          selectedId: _networkFilterId,
+          onSelected: (id) => setState(() => _networkFilterId = id),
+        ),
+      ],
+      const SizedBox(height: 12),
+    ];
     if (devices.isEmpty) {
       return [
-        const SizedBox(height: 8),
+        ...header,
         _EmptyPanel(
           icon: Icons.devices_other,
           title: _overview.devices.isEmpty ? '연결된 장비가 없습니다.' : '검색 결과가 없습니다.',
           description: _overview.devices.isEmpty
               ? '하단의 스캔 버튼으로 장비를 확인하세요.'
-              : '검색어를 바꾸거나 지워 보세요.',
+              : '검색어 또는 네트워크 필터를 바꿔 보세요.',
         ),
       ];
     }
     return [
-      const SizedBox(height: 8),
+      ...header,
       _DeviceCountHeader(count: devices.length, query: _searchQuery),
       const SizedBox(height: 12),
       switch (_view) {
@@ -641,9 +912,18 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   }
 
   List<NetworkDevice> get _filteredDevices {
+    var devices = _overview.devices;
+    final filterRecord = _networkFilterId == null
+        ? null
+        : _networkScans[_networkFilterId];
+    if (filterRecord != null) {
+      devices = devices
+          .where((device) => filterRecord.deviceIds.contains(device.id))
+          .toList(growable: false);
+    }
     final query = _searchQuery.toLowerCase();
-    if (query.isEmpty) return _overview.devices;
-    return _overview.devices
+    if (query.isEmpty) return devices;
+    return devices
         .where((device) {
           final fields = [
             device.displayName,
@@ -694,36 +974,47 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
 
   Widget _buildBottomNavigation(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return NavigationBarTheme(
-      data: NavigationBarThemeData(
-        height: 62,
-        indicatorColor: Colors.transparent,
-        iconTheme: WidgetStateProperty.resolveWith(
-          (states) => IconThemeData(
-            color: states.contains(WidgetState.selected)
-                ? scheme.primary
-                : scheme.onSurfaceVariant,
-            size: 21,
-          ),
-        ),
-        labelTextStyle: WidgetStatePropertyAll(
-          TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            color: scheme.onSurfaceVariant,
-          ),
-        ),
+    return Container(
+      height: 66,
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        border: Border(top: BorderSide(color: scheme.outlineVariant)),
       ),
-      child: NavigationBar(
-        selectedIndex: _section.index,
-        onDestinationSelected: (index) {
-          setState(() => _section = _DashboardSection.values[index]);
-        },
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), label: '홈'),
-          NavigationDestination(icon: Icon(Icons.devices_other), label: '장비'),
-          NavigationDestination(icon: Icon(Icons.shield_outlined), label: '경고'),
-        ],
+      child: MediaQuery.withClampedTextScaling(
+        maxScaleFactor: 1.3,
+        child: Row(
+          children: [
+            _NavItem(
+              icon: Icons.home_outlined,
+              label: '홈',
+              selected: _section == _DashboardSection.overview,
+              onTap: () =>
+                  setState(() => _section = _DashboardSection.overview),
+            ),
+            _NavItem(
+              icon: Icons.wifi,
+              label: '네트워크',
+              selected: _section == _DashboardSection.networks,
+              onTap: () =>
+                  setState(() => _section = _DashboardSection.networks),
+            ),
+            const SizedBox(width: 76),
+            _NavItem(
+              icon: Icons.devices_other,
+              label: '장비',
+              selected: _section == _DashboardSection.devices,
+              onTap: () =>
+                  setState(() => _section = _DashboardSection.devices),
+            ),
+            _NavItem(
+              icon: Icons.shield_outlined,
+              label: '경고',
+              selected: _section == _DashboardSection.findings,
+              onTap: () =>
+                  setState(() => _section = _DashboardSection.findings),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -958,191 +1249,376 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _TopControlBar extends StatelessWidget {
-  const _TopControlBar({
-    required this.query,
-    required this.view,
-    required this.networkCount,
-    required this.onQueryChanged,
-    required this.onViewChanged,
-    required this.onSettings,
+class _TopBar extends StatelessWidget {
+  const _TopBar({
+    required this.isScanning,
+    required this.onScanAll,
     required this.onNetworks,
+    required this.onSettings,
   });
 
-  final String query;
-  final _DashboardView view;
-  final int networkCount;
-  final ValueChanged<String> onQueryChanged;
-  final ValueChanged<_DashboardView> onViewChanged;
-  final VoidCallback onSettings;
+  final bool isScanning;
+  final VoidCallback? onScanAll;
   final VoidCallback onNetworks;
+  final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      height: 58,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: scheme.surface,
         border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
       ),
-      child: Column(
+      child: MediaQuery.withClampedTextScaling(
+        maxScaleFactor: 1.3,
+        child: Row(
+          children: [
+            Icon(Icons.wifi_tethering, color: scheme.primary, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'WifiScan',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ),
+            IconButton(
+              onPressed: onScanAll,
+              icon: Icon(isScanning ? Icons.sync : Icons.travel_explore),
+              tooltip: '전체 네트워크 스캔',
+              visualDensity: VisualDensity.compact,
+            ),
+            IconButton(
+              onPressed: onNetworks,
+              icon: const Icon(Icons.wifi_find_outlined),
+              tooltip: '네트워크 프로필',
+              visualDensity: VisualDensity.compact,
+            ),
+            IconButton(
+              onPressed: onSettings,
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: '설정',
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = selected ? scheme.primary : scheme.onSurfaceVariant;
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 22, color: color),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DeviceControlBar extends StatelessWidget {
+  const _DeviceControlBar({
+    required this.query,
+    required this.view,
+    required this.onQueryChanged,
+    required this.onViewChanged,
+  });
+
+  final String query;
+  final _DashboardView view;
+  final ValueChanged<String> onQueryChanged;
+  final ValueChanged<_DashboardView> onViewChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            onChanged: onQueryChanged,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: '장비 검색',
+              prefixIcon: const Icon(Icons.search, size: 20),
+              suffixIcon: query.isEmpty
+                  ? null
+                  : IconButton(
+                      onPressed: () => onQueryChanged(''),
+                      icon: const Icon(Icons.clear, size: 18),
+                      tooltip: '검색어 지우기',
+                    ),
+              isDense: true,
+              filled: true,
+              fillColor: scheme.surfaceContainerHighest.withValues(
+                alpha: 0.55,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 6),
+        for (final entry in const [
+          (_DashboardView.mesh, Icons.hub_outlined, '메시'),
+          (_DashboardView.cards, Icons.grid_view_rounded, '카드'),
+          (_DashboardView.list, Icons.view_list_rounded, '목록'),
+        ])
+          IconButton(
+            onPressed: () => onViewChanged(entry.$1),
+            icon: Icon(entry.$2, size: 20),
+            tooltip: entry.$3,
+            color: view == entry.$1 ? scheme.primary : scheme.onSurfaceVariant,
+            visualDensity: VisualDensity.compact,
+          ),
+      ],
+    );
+  }
+}
+
+class _NetworkFilterChips extends StatelessWidget {
+  const _NetworkFilterChips({
+    required this.profiles,
+    required this.selectedId,
+    required this.onSelected,
+  });
+
+  final List<NetworkProfile> profiles;
+  final String? selectedId;
+  final ValueChanged<String?> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Icon(Icons.wifi_tethering, color: scheme.primary),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextField(
-                  onChanged: onQueryChanged,
-                  textInputAction: TextInputAction.search,
-                  decoration: InputDecoration(
-                    hintText: '장비 검색',
-                    prefixIcon: const Icon(Icons.search, size: 20),
-                    suffixIcon: query.isEmpty
-                        ? null
-                        : IconButton(
-                            onPressed: () => onQueryChanged(''),
-                            icon: const Icon(Icons.clear, size: 18),
-                            tooltip: '검색어 지우기',
-                          ),
-                    isDense: true,
-                    filled: true,
-                    fillColor: scheme.surfaceContainerHighest.withValues(
-                      alpha: 0.55,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                onPressed: onNetworks,
-                icon: Badge(
-                  isLabelVisible: networkCount > 0,
-                  label: Text('$networkCount'),
-                  child: const Icon(Icons.wifi_find_outlined),
-                ),
-                tooltip: '네트워크 프로필',
-              ),
-              const SizedBox(width: 2),
-              IconButton(
-                onPressed: onSettings,
-                icon: const Icon(Icons.settings_outlined),
-                tooltip: '설정',
-              ),
-            ],
+          ChoiceChip(
+            label: const Text('전체'),
+            selected: selectedId == null,
+            onSelected: (_) => onSelected(null),
+            visualDensity: VisualDensity.compact,
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Text('보기', style: Theme.of(context).textTheme.labelMedium),
-              const SizedBox(width: 10),
-              Expanded(
-                child: SegmentedButton<_DashboardView>(
-                  segments: const [
-                    ButtonSegment(
-                      value: _DashboardView.mesh,
-                      icon: Icon(Icons.hub_outlined, size: 17),
-                      label: Text('메시'),
-                    ),
-                    ButtonSegment(
-                      value: _DashboardView.cards,
-                      icon: Icon(Icons.grid_view_rounded, size: 17),
-                      label: Text('카드'),
-                    ),
-                    ButtonSegment(
-                      value: _DashboardView.list,
-                      icon: Icon(Icons.view_list_rounded, size: 17),
-                      label: Text('목록'),
-                    ),
-                  ],
-                  selected: {view},
-                  onSelectionChanged: (selection) =>
-                      onViewChanged(selection.first),
-                  showSelectedIcon: false,
-                  style: const ButtonStyle(
-                    visualDensity: VisualDensity.compact,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                ),
+          for (final profile in profiles) ...[
+            const SizedBox(width: 6),
+            ChoiceChip(
+              avatar: Icon(
+                _is5GhzSsid(profile.ssid) ? Icons.network_wifi : Icons.wifi,
+                size: 15,
               ),
-            ],
-          ),
+              label: Text(profile.displayName),
+              selected: selectedId == profile.id,
+              onSelected: (_) => onSelected(profile.id),
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
         ],
       ),
     );
   }
 }
 
-class _NetworkProfilePanel extends StatelessWidget {
-  const _NetworkProfilePanel({
+class _RouterGroupCard extends StatelessWidget {
+  const _RouterGroupCard({
+    required this.groupName,
     required this.profiles,
-    required this.selectedId,
+    required this.currentSsid,
+    required this.scans,
     required this.isScanning,
-    required this.onManage,
-    required this.onScanAll,
+    required this.onScan,
+    required this.onShowDevices,
   });
 
+  final String groupName;
   final List<NetworkProfile> profiles;
-  final String? selectedId;
+  final String? currentSsid;
+  final Map<String, _NetworkScanRecord> scans;
   final bool isScanning;
-  final VoidCallback onManage;
-  final VoidCallback onScanAll;
+  final ValueChanged<NetworkProfile> onScan;
+  final ValueChanged<NetworkProfile> onShowDevices;
 
   @override
   Widget build(BuildContext context) {
-    final selected =
-        profiles.where((profile) => profile.id == selectedId).isEmpty
-        ? null
-        : profiles.firstWhere((profile) => profile.id == selectedId);
+    final scheme = Theme.of(context).colorScheme;
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+            child: Row(
               children: [
-                Icon(
-                  Icons.wifi_find_outlined,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(width: 8),
+                Icon(Icons.router_outlined, size: 20, color: scheme.primary),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    selected == null
-                        ? '네트워크 프로필 없음'
-                        : '선택: ${selected.displayName}',
+                    groupName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleSmall,
                   ),
                 ),
-                IconButton(
-                  onPressed: onManage,
-                  icon: const Icon(Icons.edit_outlined, size: 19),
-                  tooltip: '네트워크 프로필 관리',
+                Text(
+                  'Wi-Fi ${profiles.length}개',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
-            Text(
-              profiles.isEmpty
-                  ? '연결 가능한 Wi-Fi를 프로필에 추가하세요.'
-                  : '${profiles.length}개 네트워크를 순차적으로 확인할 수 있습니다.',
-              style: Theme.of(context).textTheme.bodySmall,
+          ),
+          for (final profile in profiles)
+            _NetworkRow(
+              profile: profile,
+              isConnected: currentSsid == profile.ssid,
+              record: scans[profile.id],
+              isScanning: isScanning,
+              onScan: () => onScan(profile),
+              onTap: () => onShowDevices(profile),
             ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: profiles.isEmpty || isScanning ? null : onScanAll,
-                icon: Icon(isScanning ? Icons.sync : Icons.travel_explore),
-                label: Text(isScanning ? '전체 네트워크 검색 중' : '전체 네트워크 스캔'),
+          const SizedBox(height: 6),
+        ],
+      ),
+    );
+  }
+}
+
+class _NetworkRow extends StatelessWidget {
+  const _NetworkRow({
+    required this.profile,
+    required this.isConnected,
+    required this.record,
+    required this.isScanning,
+    required this.onScan,
+    required this.onTap,
+  });
+
+  final NetworkProfile profile;
+  final bool isConnected;
+  final _NetworkScanRecord? record;
+  final bool isScanning;
+  final VoidCallback onScan;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final is5Ghz = _is5GhzSsid(profile.ssid);
+    final status = record == null
+        ? '아직 스캔하지 않았습니다.'
+        : record!.failed
+        ? '연결하지 못했습니다.'
+        : '장비 ${record!.deviceIds.length}개 · ${_formatTimestamp(record!.scannedAt)}';
+    return InkWell(
+      onTap: record != null && !record!.failed ? onTap : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: (is5Ghz ? scheme.primary : scheme.tertiary).withValues(
+                  alpha: 0.16,
+                ),
+                borderRadius: BorderRadius.circular(7),
               ),
+              child: Text(
+                is5Ghz ? '5G' : '2.4G',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: is5Ghz ? scheme.primary : scheme.tertiary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          profile.displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      if (isConnected) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            color: Colors.greenAccent.shade400,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  Text(
+                    status,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: record?.failed == true
+                          ? scheme.error
+                          : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              onPressed: isScanning ? null : onScan,
+              icon: const Icon(Icons.radar, size: 20),
+              tooltip: '${profile.displayName} 스캔',
+              color: scheme.primary,
+              visualDensity: VisualDensity.compact,
             ),
           ],
         ),
@@ -1155,14 +1631,18 @@ class _SummaryPanel extends StatelessWidget {
   const _SummaryPanel({
     required this.deviceCount,
     required this.warningCount,
+    required this.networkCount,
+    required this.scannedNetworkCount,
     required this.isScanning,
-    required this.message,
+    required this.onNetworksTap,
   });
 
   final int deviceCount;
   final int warningCount;
+  final int networkCount;
+  final int scannedNetworkCount;
   final bool isScanning;
-  final String? message;
+  final VoidCallback onNetworksTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1190,11 +1670,15 @@ class _SummaryPanel extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: _SummaryValue(
-                icon: isScanning ? Icons.radar : Icons.check_circle_outline,
-                value: isScanning ? '진행' : '대기',
-                label: message == null ? '상태' : '최근 결과',
-                color: isScanning ? scheme.tertiary : scheme.primary,
+              child: InkWell(
+                onTap: onNetworksTap,
+                borderRadius: BorderRadius.circular(10),
+                child: _SummaryValue(
+                  icon: isScanning ? Icons.radar : Icons.wifi,
+                  value: '$scannedNetworkCount/$networkCount',
+                  label: '네트워크',
+                  color: isScanning ? scheme.tertiary : scheme.primary,
+                ),
               ),
             ),
           ],
@@ -2109,6 +2593,19 @@ String _severityLabel(FindingSeverity severity) => switch (severity) {
   FindingSeverity.warning => '주의',
   FindingSeverity.critical => '긴급',
 };
+
+bool _is5GhzSsid(String ssid) =>
+    RegExp(r'5\s*g(hz)?', caseSensitive: false).hasMatch(ssid);
+
+String _routerGroupName(String ssid) {
+  final base = ssid
+      .replaceFirst(
+        RegExp(r'[\s_-]*(2[.,]?4|5)\s*g(hz)?\s*$', caseSensitive: false),
+        '',
+      )
+      .trim();
+  return base.isEmpty ? ssid : base;
+}
 
 IconData _deviceIcon(DeviceCategory category) => switch (category) {
   DeviceCategory.router => Icons.router,
