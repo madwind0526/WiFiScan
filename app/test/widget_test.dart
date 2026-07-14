@@ -54,6 +54,12 @@ void main() {
     expect(find.text('식별 신뢰도'), findsOneWidget);
     expect(find.text('MAC 주소'), findsOneWidget);
     await tester.tap(find.byTooltip('닫기'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('기본 게이트웨이'));
+    await tester.pumpAndSettle();
+    expect(find.text('A6004NS-M'), findsOneWidget);
+    expect(find.textContaining('HTTP 80/tcp'), findsOneWidget);
+    await tester.tap(find.byTooltip('닫기'));
   });
 
   testWidgets('allows the user to stop an active scan', (tester) async {
@@ -328,6 +334,17 @@ class _FakeDiscoveryService implements NetworkDiscoveryService {
           firstSeenAt: DateTime(2026, 7, 11),
           lastSeenAt: DateTime(2026, 7, 11),
           identityConfidence: 0.85,
+          vendor: 'EFM Networks',
+          modelName: 'A6004NS-M',
+          hostnames: const ['router.local'],
+          services: const [
+            NetworkServiceObservation(
+              protocol: 'http',
+              port: 80,
+              transport: NetworkTransport.tcp,
+              source: DiscoverySource.serviceProbe,
+            ),
+          ],
         ),
       ],
       limitations: const ['테스트 검색 결과입니다.'],

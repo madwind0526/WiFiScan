@@ -18,9 +18,61 @@ enum DiscoverySource {
   router,
   neighbor,
   subnet,
+  reverseDns,
   mdns,
   ssdp,
+  serviceProbe,
   manual,
+}
+
+enum NetworkTransport { tcp, udp }
+
+class NetworkServiceObservation {
+  const NetworkServiceObservation({
+    required this.protocol,
+    required this.port,
+    required this.transport,
+    required this.source,
+    this.product,
+    this.version,
+  });
+
+  final String protocol;
+  final int port;
+  final NetworkTransport transport;
+  final DiscoverySource source;
+  final String? product;
+  final String? version;
+
+  String get identityKey => '${transport.name}:$port:$protocol';
+
+  Map<String, Object?> toJson() => {
+    'protocol': protocol,
+    'port': port,
+    'transport': transport.name,
+    'source': source.name,
+    if (product != null) 'product': product,
+    if (version != null) 'version': version,
+  };
+
+  factory NetworkServiceObservation.fromJson(Map<String, Object?> json) {
+    return NetworkServiceObservation(
+      protocol: json['protocol']?.toString() ?? 'unknown',
+      port: (json['port'] as num?)?.toInt() ?? 0,
+      transport: _enumByName(
+        NetworkTransport.values,
+        json['transport']?.toString(),
+        NetworkTransport.tcp,
+      ),
+      source: _enumByName(
+        DiscoverySource.values,
+        json['source']?.toString(),
+        DiscoverySource.subnet,
+      ),
+      product: json['product']?.toString(),
+      version: json['version']?.toString(),
+    );
+  }
 }
 
 class NetworkDevice {
@@ -36,6 +88,10 @@ class NetworkDevice {
     required this.identityConfidence,
     this.macAddress,
     this.vendor,
+    this.modelName,
+    this.description,
+    this.hostnames = const [],
+    this.services = const [],
   });
 
   final String id;
@@ -49,6 +105,10 @@ class NetworkDevice {
   final double identityConfidence;
   final String? macAddress;
   final String? vendor;
+  final String? modelName;
+  final String? description;
+  final List<String> hostnames;
+  final List<NetworkServiceObservation> services;
 
   NetworkDevice copyWith({
     String? id,
@@ -62,6 +122,10 @@ class NetworkDevice {
     double? identityConfidence,
     String? macAddress,
     String? vendor,
+    String? modelName,
+    String? description,
+    List<String>? hostnames,
+    List<NetworkServiceObservation>? services,
   }) {
     return NetworkDevice(
       id: id ?? this.id,
@@ -75,6 +139,10 @@ class NetworkDevice {
       identityConfidence: identityConfidence ?? this.identityConfidence,
       macAddress: macAddress ?? this.macAddress,
       vendor: vendor ?? this.vendor,
+      modelName: modelName ?? this.modelName,
+      description: description ?? this.description,
+      hostnames: hostnames ?? this.hostnames,
+      services: services ?? this.services,
     );
   }
 
@@ -91,6 +159,11 @@ class NetworkDevice {
       'identityConfidence': identityConfidence,
       if (macAddress != null) 'macAddress': macAddress,
       if (vendor != null) 'vendor': vendor,
+      if (modelName != null) 'modelName': modelName,
+      if (description != null) 'description': description,
+      if (hostnames.isNotEmpty) 'hostnames': hostnames,
+      if (services.isNotEmpty)
+        'services': services.map((service) => service.toJson()).toList(),
     };
   }
 
@@ -115,8 +188,24 @@ class NetworkDevice {
       identityConfidence: (json['identityConfidence'] as num?)?.toDouble() ?? 0,
       macAddress: json['macAddress']?.toString(),
       vendor: json['vendor']?.toString(),
+      modelName: json['modelName']?.toString(),
+      description: json['description']?.toString(),
+      hostnames: _stringList(json['hostnames']),
+      services: _serviceList(json['services']),
     );
   }
+}
+
+List<NetworkServiceObservation> _serviceList(Object? value) {
+  if (value is! List) return const [];
+  return value
+      .whereType<Map>()
+      .map(
+        (item) =>
+            NetworkServiceObservation.fromJson(item.cast<String, Object?>()),
+      )
+      .where((service) => service.port > 0)
+      .toList(growable: false);
 }
 
 T _enumByName<T extends Enum>(List<T> values, String? name, T fallback) {

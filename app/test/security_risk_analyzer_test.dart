@@ -44,6 +44,62 @@ void main() {
     expect(report.findings.single.title, '검색 범위가 제한되었습니다');
     expect(report.findings.single.severity, FindingSeverity.information);
   });
+
+  test('reports exposed plaintext services with observed-port evidence', () {
+    final device = NetworkDevice(
+      id: 'router',
+      displayName: 'ipTIME 공유기',
+      category: DeviceCategory.router,
+      ownershipStatus: OwnershipStatus.confirmed,
+      ipAddresses: const ['192.168.0.1'],
+      sources: const [DiscoverySource.router, DiscoverySource.serviceProbe],
+      firstSeenAt: DateTime(2026, 7, 15),
+      lastSeenAt: DateTime(2026, 7, 15),
+      identityConfidence: 0.9,
+      modelName: 'A6004NS-M',
+      services: const [
+        NetworkServiceObservation(
+          protocol: 'telnet',
+          port: 23,
+          transport: NetworkTransport.tcp,
+          source: DiscoverySource.serviceProbe,
+        ),
+        NetworkServiceObservation(
+          protocol: 'http',
+          port: 80,
+          transport: NetworkTransport.tcp,
+          source: DiscoverySource.serviceProbe,
+        ),
+      ],
+    );
+    final snapshot = _snapshot([device]);
+
+    final report = const SecurityRiskAnalyzer().analyze(
+      snapshot: snapshot,
+      inventoryUpdate: InventoryUpdate(
+        snapshot: snapshot,
+        newDevices: const [],
+        disappearedDevices: const [],
+        changedDevices: const [],
+        isBaseline: false,
+      ),
+    );
+
+    expect(
+      report.findings.map((finding) => finding.title),
+      containsAll([
+        '평문 원격 접속 서비스 노출',
+        'HTTPS 없이 웹 서비스가 열려 있습니다',
+        'ipTIME A6004NS-M 펌웨어 확인 필요',
+      ]),
+    );
+    expect(
+      report.findings
+          .firstWhere((finding) => finding.id.startsWith('plaintext-remote'))
+          .evidence,
+      contains('23/tcp'),
+    );
+  });
 }
 
 InventorySnapshot _snapshot(

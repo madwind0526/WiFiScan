@@ -974,7 +974,11 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
           final fields = [
             device.displayName,
             device.vendor ?? '',
+            device.modelName ?? '',
+            device.description ?? '',
             device.macAddress ?? '',
+            ...device.hostnames,
+            ...device.services.map((service) => service.protocol),
             ...device.ipAddresses,
           ];
           return fields.any((field) => field.toLowerCase().contains(query));
@@ -1344,6 +1348,20 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                     value: device.macAddress ?? '확인되지 않음',
                   ),
                   _DetailRow(label: '제조사', value: device.vendor ?? '확인되지 않음'),
+                  if (device.modelName != null)
+                    _DetailRow(label: '모델', value: device.modelName!),
+                  if (device.description != null)
+                    _DetailRow(label: '장비 설명', value: device.description!),
+                  if (device.hostnames.isNotEmpty)
+                    _DetailRow(
+                      label: '호스트 이름',
+                      value: device.hostnames.join(', '),
+                    ),
+                  if (device.services.isNotEmpty)
+                    _DetailRow(
+                      label: '발견 서비스',
+                      value: device.services.map(_serviceLabel).join('\n'),
+                    ),
                   _DetailRow(
                     label: '탐색 근거',
                     value: device.sources.map(_sourceLabel).join(', '),
@@ -1364,8 +1382,13 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                   _InfoCallout(
                     icon: Icons.info_outline,
                     text:
-                        '현재 탐색은 로컬 네트워크에서 확인 가능한 주소·이웃 테이블 중심입니다. '
-                        '서비스 포트, mDNS/SSDP 이름, 제조사 정보는 별도 탐색을 추가하면 더 풍부해집니다.',
+                        device.services.isEmpty &&
+                            !device.sources.contains(DiscoverySource.mdns) &&
+                            !device.sources.contains(DiscoverySource.ssdp)
+                        ? '장비가 이름이나 서비스를 공개하지 않아 주소 정보만 확인되었습니다. '
+                              '공유기 접속 목록과 함께 확인하면 식별 정확도를 높일 수 있습니다.'
+                        : '표시된 이름과 서비스는 mDNS, SSDP 또는 제한된 연결 확인에서 '
+                              '장비가 공개적으로 응답한 정보입니다.',
                   ),
                   const SizedBox(height: 18),
                   SizedBox(
@@ -2471,7 +2494,9 @@ class _DeviceCardGrid extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                             ),
                             Text(
-                              device.vendor ?? _categoryLabel(device.category),
+                              device.modelName ??
+                                  device.vendor ??
+                                  _categoryLabel(device.category),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.labelSmall,
@@ -3170,10 +3195,19 @@ String _sourceLabel(DiscoverySource source) => switch (source) {
   DiscoverySource.router => '공유기',
   DiscoverySource.neighbor => '이웃 테이블',
   DiscoverySource.subnet => '서브넷 탐색',
+  DiscoverySource.reverseDns => '역방향 DNS',
   DiscoverySource.mdns => 'mDNS',
   DiscoverySource.ssdp => 'SSDP',
+  DiscoverySource.serviceProbe => '서비스 확인',
   DiscoverySource.manual => '수동 등록',
 };
+
+String _serviceLabel(NetworkServiceObservation service) {
+  final product = service.product == null ? '' : ' · ${service.product}';
+  final version = service.version == null ? '' : ' ${service.version}';
+  return '${service.protocol.toUpperCase()} '
+      '${service.port}/${service.transport.name}$product$version';
+}
 
 String _formatDateTime(DateTime value) => _formatTimestamp(value);
 

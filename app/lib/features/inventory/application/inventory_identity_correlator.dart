@@ -86,6 +86,12 @@ class InventoryIdentityCorrelator {
       addresses.join(','),
       device.macAddress ?? '',
       device.vendor ?? '',
+      device.modelName ?? '',
+      device.description ?? '',
+      ([...device.hostnames]..sort()).join(','),
+      ([
+        ...device.services.map((service) => service.identityKey),
+      ]..sort()).join(','),
       sources.join(','),
     ].join('|');
   }

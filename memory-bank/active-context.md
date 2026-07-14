@@ -2,6 +2,7 @@
 
 ## Current Focus
 
+- Wave 10에서 mDNS/DNS-SD, SSDP/UPnP, 역방향 DNS, 제한된 TCP 서비스 확인을 기존 탐색에 결합하고 A6004NS-M 펌웨어 확인 안내를 추가했다.
 - WifiScan은 현재 로컬 Wi-Fi/LAN의 휴대폰, PC, 가전, IoT 장비를 목록화하고 잠재적 보안 위험을 알리는 도구다.
 - Wave 9에서 Wi-Fi 암호를 OS 보안 저장소로 분리하고 사용자 암호 기반 프로필 가져오기/내보내기와 기존 `passwordEnc` 자동 이전을 구현했다.
 - Wave 8에서 file_picker 11/AGP 9 legacy Kotlin APK 빌드를 복구하고 프로필 입력 다이얼로그의 키보드·큰 글꼴·컨트롤러 수명주기 회귀를 수정했다.
@@ -10,4 +11,4 @@
 - 스캔 결과는 프로필 id → deviceIds/scannedAt/failed 레코드로 저장해 네트워크별 장비 수와 최근 스캔 시각을 표시한다.
 - 사용자 환경: 공유기 2대 × (2.4GHz + 5GHz) = Wi-Fi 4개. 실제 환경에서 프로필 자동 탐색(netsh) 및 전체 스캔 검증 필요.
 - 기본 점검은 비침투 방식이며 자동 대응은 공식 관리 경로와 명시적 승인이 있을 때만 허용한다.
-- Android 실기기 검증, mDNS/SSDP 탐색, 공유기 제조사 API 연동은 후속 확장 대상이다.
+- Android 실기기에서 mDNS/SSDP 응답과 멀티캐스트 잠금 동작을 검증하고, 공식 근거가 있는 경우에만 ipTIME 읽기 전용 커넥터를 확장한다.

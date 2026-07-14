@@ -39,3 +39,7 @@ Windows 창을 480×920 세로형으로 고정하고, 상단 58px 아이콘 바(
 ## Split Profile Metadata, Credentials, and Backups
 
 프로필 저장을 세 계층으로 나눈다. SSID와 표시 이름 같은 메타데이터는 로컬 JSON, Wi-Fi 암호는 `flutter_secure_storage`, 기기 간 이동용 파일은 사용자 암호 기반 PBKDF2 + AES-GCM 암호문으로 저장한다. 백업 코덱과 파일 선택 서비스를 UI에 주입 가능하게 분리하면 실제 파일 선택 플러그인 없이도 암호 확인, 취소, 저장, 불러오기 흐름을 위젯 테스트할 수 있다.
+
+## Failure-Isolated Network Enrichment
+
+ICMP/neighbor 결과만으로 부족한 장비 정보를 역방향 DNS, mDNS/DNS-SD, SSDP/UPnP, 제한된 TCP 연결 확인 제공자로 보강한다. 각 제공자는 동일한 IP 기반 증거 모델을 반환하고 병렬 실행하며, 개별 실패는 전체 탐색을 실패시키지 않는다. SSDP 설명 문서는 기존 탐색 대상 IP의 HTTP 주소만 허용하고 리디렉션을 따르지 않아 임의 외부 요청을 막으며, TCP 확인은 연결 여부만 수집하고 애플리케이션 payload를 전송하지 않는다.

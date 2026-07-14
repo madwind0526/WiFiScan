@@ -1,18 +1,39 @@
 import 'dart:io';
 
 import 'package:wifi_scan/features/discovery/application/network_discovery_service.dart';
+import 'package:wifi_scan/features/discovery/application/network_information_enricher.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/android_network_discovery_service.dart';
 import 'package:wifi_scan/features/discovery/domain/discovery_result.dart';
+import 'package:wifi_scan/features/discovery/infrastructure/enriched_network_discovery_service.dart';
+import 'package:wifi_scan/features/discovery/infrastructure/mdns_enrichment_provider.dart';
+import 'package:wifi_scan/features/discovery/infrastructure/reverse_dns_enrichment_provider.dart';
+import 'package:wifi_scan/features/discovery/infrastructure/ssdp_enrichment_provider.dart';
+import 'package:wifi_scan/features/discovery/infrastructure/tcp_service_probe_provider.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/windows_network_discovery_service.dart';
 
 NetworkDiscoveryService createNetworkDiscoveryService() {
+  NetworkDiscoveryService? delegate;
   if (Platform.isWindows) {
-    return const WindowsNetworkDiscoveryService();
+    delegate = const WindowsNetworkDiscoveryService();
   }
   if (Platform.isAndroid) {
-    return const AndroidNetworkDiscoveryService();
+    delegate = const AndroidNetworkDiscoveryService();
   }
-  return const _UnsupportedNetworkDiscoveryService();
+  if (delegate == null) return const _UnsupportedNetworkDiscoveryService();
+  return EnrichedNetworkDiscoveryService(
+    delegate: delegate,
+    enrichmentLease: Platform.isAndroid
+        ? const AndroidMulticastEnrichmentLease()
+        : const NetworkEnrichmentLease(),
+    enricher: const NetworkInformationEnricher(
+      providers: [
+        ReverseDnsEnrichmentProvider(),
+        MdnsEnrichmentProvider(),
+        SsdpEnrichmentProvider(),
+        TcpServiceProbeProvider(),
+      ],
+    ),
+  );
 }
 
 class _UnsupportedNetworkDiscoveryService implements NetworkDiscoveryService {

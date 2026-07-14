@@ -31,6 +31,7 @@ class MainActivity : FlutterActivity() {
     private var pendingPermissionResult: MethodChannel.Result? = null
     private var pendingNetworkResult: MethodChannel.Result? = null
     private var requestedNetworkCallback: ConnectivityManager.NetworkCallback? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
     private val commandExecutor = Executors.newCachedThreadPool()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -45,6 +46,8 @@ class MainActivity : FlutterActivity() {
             "requestPermission" -> requestNetworkPermission(result)
             "networkContext" -> result.success(networkContext())
             "discoverHosts" -> discoverHosts(call, result)
+            "acquireMulticastLock" -> acquireMulticastLock(result)
+            "releaseMulticastLock" -> releaseMulticastLock(result)
             "currentSsid" -> result.success(currentSsid())
             "connectNetwork" -> connectNetwork(call, result)
             "restoreNetwork" -> restoreNetwork(result)
@@ -225,6 +228,34 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun acquireMulticastLock(result: MethodChannel.Result) {
+        try {
+            val lock = multicastLock ?: getSystemService(WifiManager::class.java)
+                .createMulticastLock("wifiscan-discovery")
+                .also {
+                    it.setReferenceCounted(false)
+                    multicastLock = it
+                }
+            if (!lock.isHeld) lock.acquire()
+            result.success(true)
+        } catch (exception: Exception) {
+            result.error("multicast_lock_failed", "멀티캐스트 탐색을 준비하지 못했습니다.", null)
+        }
+    }
+
+    private fun releaseMulticastLock(result: MethodChannel.Result) {
+        releaseMulticastLockSafely()
+        result.success(true)
+    }
+
+    private fun releaseMulticastLockSafely() {
+        try {
+            multicastLock?.takeIf { it.isHeld }?.release()
+        } catch (_: Exception) {
+            // Cleanup is best effort.
+        }
+    }
+
     private fun isPrivateIpv4(address: LinkAddress): Boolean {
         val value = address.address
         if (value !is Inet4Address) return false
@@ -266,6 +297,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        releaseMulticastLockSafely()
         getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null)
         requestedNetworkCallback?.let { callback ->
             try {

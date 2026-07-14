@@ -2,10 +2,10 @@
 
 ## Current Wave
 
-- **Wave:** 9
+- **Wave:** 10
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-15 Wave 9 OS 보안 저장소, 기존 passwordEnc 이전, 암호 기반 프로필 가져오기/내보내기, 키보드 회귀, analyze/test/Windows/APK 검증 완료
+- **Last Checkpoint:** 2026-07-15 Wave 10 mDNS/DNS-SD, SSDP/UPnP, 역방향 DNS, 제한된 TCP 서비스 보강, A6004NS-M 안내, analyze/test/Windows/APK 검증 완료
 
 ## Wave History
 
@@ -21,6 +21,7 @@
 | 7 | 세로형 아이콘 셸 UI 리디자인과 네트워크 탭 | Done |
 | 8 | Android APK 빌드 복구와 프로필 입력 다이얼로그 회귀 수정 | Done |
 | 9 | OS 보안 저장소와 암호 기반 프로필 가져오기/내보내기 | Done |
+| 10 | 비침투 네트워크 정보 보강과 서비스 기반 보안 안내 | Done |
 
 ## Session Notes
 

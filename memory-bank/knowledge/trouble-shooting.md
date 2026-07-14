@@ -58,3 +58,11 @@
 - 원인: 로컬 저장과 기기 간 내보내기가 같은 앱 고정 키 암호화 경로를 공유했다.
 - 해결: 새 암호는 `flutter_secure_storage`에 프로필별로 저장하고 메타데이터 JSON에는 암호 필드를 쓰지 않는다. 기존 `passwordEnc`는 로드 시 복호화해 보안 저장소로 옮긴 뒤 모든 이전이 성공한 경우에만 JSON에서 제거한다. 내보내기는 별도의 사용자 암호 기반 PBKDF2-HMAC-SHA256 + AES-256-GCM 포맷으로 분리했다.
 - 검증: 메타데이터 비밀값 부재, 보안 저장소 복원, 프로필 삭제, 기존 형식 이전 단위 테스트와 암호 내보내기/불러오기 위젯 테스트 통과. Android debug APK 및 Windows release 빌드 성공.
+
+## Windows multicast_dns reusePort 소켓 오류
+
+- 확인일: 2026-07-15
+- 증상: 실제 Windows 네트워크에서 `multicast_dns` 기본 소켓 팩터리로 mDNS 조회를 시작하면 `reusePort` 관련 소켓 오류가 발생했다.
+- 원인: Windows의 UDP 소켓 구현이 패키지 기본 `reusePort: true` 조합을 지원하지 않는다.
+- 해결: Windows에서만 `RawDatagramSocket.bind`를 `reuseAddress: true`, `reusePort: false`로 호출하는 소켓 팩터리를 주입하고 다른 플랫폼은 패키지 기본값을 사용한다. Android는 조회 기간에만 `WifiManager.MulticastLock`을 획득하고 `finally`에서 해제한다.
+- 검증: 실제 Windows 보강 통합 테스트에서 소켓 오류 없이 완료하고, 전체 22개 테스트와 Windows release 및 Android debug APK 빌드가 통과했다.
