@@ -2439,14 +2439,6 @@ class _MeshNetworkView extends StatelessWidget {
                     ],
                   ),
                 ),
-                Positioned(
-                  right: 12,
-                  bottom: 12,
-                  child: Text(
-                    '노드를 눌러 상세 정보',
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                ),
               ],
             );
           },
