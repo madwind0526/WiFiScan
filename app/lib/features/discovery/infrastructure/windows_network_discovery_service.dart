@@ -125,12 +125,13 @@ class WindowsNetworkDiscoveryService implements NetworkDiscoveryService {
         if (scanPlan.coverageLimited) '네트워크가 넓어 현재 주소가 속한 /24 범위만 검색했습니다.',
         '절전, 방화벽, AP 격리 또는 다른 VLAN의 장비는 탐지되지 않을 수 있습니다.',
         '이번 검색은 Windows 이웃 테이블과 제한된 ICMP 탐색을 사용했습니다.',
+        '같은 게이트웨이와 서브넷을 공유하는 SSID는 장비 목록이 겹칠 수 있습니다.',
       ],
       duration: stopwatch.elapsed,
     );
   }
 
-  Future<_RawNetworkContext> _readPrimaryNetworkContext() async {
+  Future<WindowsNetworkContextCandidate> _readPrimaryNetworkContext() async {
     const script = r'''
 $items = @(
   Get-NetIPConfiguration | Where-Object {
@@ -150,6 +151,7 @@ $items = @(
         ipv4Address = $address.IPAddress
         prefixLength = $address.PrefixLength
         gateway = $gateway
+        isWireless = ([int]$_.NetAdapter.NdisPhysicalMedium -eq 9)
       }
     }
   }
@@ -159,18 +161,31 @@ ConvertTo-Json -InputObject $items -Compress
     final decoded = await _runPowerShellJson(script);
     final items = _asObjectList(decoded);
     final candidates = items
-        .map(_RawNetworkContext.fromJson)
+        .map(WindowsNetworkContextCandidate.fromJson)
         .where((item) => _isPrivateIpv4(item.ipv4Address))
         .toList();
     if (candidates.isEmpty) {
       throw const DiscoveryUnavailableException(
-        '검색 가능한 활성 IPv4 네트워크를 찾지 못했습니다.',
+        '검색 가능한 활성 Wi-Fi IPv4 네트워크를 찾지 못했습니다.',
       );
     }
 
-    return candidates.firstWhere(
-      (item) => item.gateway.isNotEmpty,
-      orElse: () => candidates.first,
+    return selectWirelessNetworkContext(candidates);
+  }
+
+  static WindowsNetworkContextCandidate selectWirelessNetworkContext(
+    List<WindowsNetworkContextCandidate> candidates,
+  ) {
+    for (final candidate in candidates) {
+      if (candidate.isWireless && candidate.gateway.isNotEmpty) {
+        return candidate;
+      }
+    }
+    for (final candidate in candidates) {
+      if (candidate.isWireless) return candidate;
+    }
+    throw const DiscoveryUnavailableException(
+      '활성 Wi-Fi 연결을 찾지 못했습니다. Wi-Fi에 연결한 뒤 다시 시도하세요.',
     );
   }
 
@@ -273,7 +288,7 @@ ConvertTo-Json -InputObject \$items -Compress
     }
   }
 
-  static _ScanPlan _createScanPlan(_RawNetworkContext context) {
+  static _ScanPlan _createScanPlan(WindowsNetworkContextCandidate context) {
     final localAddress = _parseIpv4(context.ipv4Address);
     var prefixLength = context.prefixLength.clamp(0, 32);
     var coverageLimited = false;
@@ -411,22 +426,24 @@ ConvertTo-Json -InputObject \$items -Compress
   }
 }
 
-class _RawNetworkContext {
-  const _RawNetworkContext({
+class WindowsNetworkContextCandidate {
+  const WindowsNetworkContextCandidate({
     required this.interfaceName,
     required this.interfaceIndex,
     required this.ipv4Address,
     required this.prefixLength,
     required this.gateway,
+    required this.isWireless,
   });
 
-  factory _RawNetworkContext.fromJson(Map<String, Object?> json) {
-    return _RawNetworkContext(
+  factory WindowsNetworkContextCandidate.fromJson(Map<String, Object?> json) {
+    return WindowsNetworkContextCandidate(
       interfaceName: json['interfaceName']?.toString() ?? '',
       interfaceIndex: int.tryParse(json['interfaceIndex'].toString()) ?? -1,
       ipv4Address: json['ipv4Address']?.toString() ?? '',
       prefixLength: int.tryParse(json['prefixLength'].toString()) ?? 24,
       gateway: json['gateway']?.toString() ?? '',
+      isWireless: json['isWireless'] == true,
     );
   }
 
@@ -435,6 +452,7 @@ class _RawNetworkContext {
   final String ipv4Address;
   final int prefixLength;
   final String gateway;
+  final bool isWireless;
 }
 
 class _ScanPlan {

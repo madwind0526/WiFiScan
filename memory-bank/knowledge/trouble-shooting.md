@@ -66,3 +66,19 @@
 - 원인: Windows의 UDP 소켓 구현이 패키지 기본 `reusePort: true` 조합을 지원하지 않는다.
 - 해결: Windows에서만 `RawDatagramSocket.bind`를 `reuseAddress: true`, `reusePort: false`로 호출하는 소켓 팩터리를 주입하고 다른 플랫폼은 패키지 기본값을 사용한다. Android는 조회 기간에만 `WifiManager.MulticastLock`을 획득하고 `finally`에서 해제한다.
 - 검증: 실제 Windows 보강 통합 테스트에서 소켓 오류 없이 완료하고, 전체 22개 테스트와 Windows release 및 Android debug APK 빌드가 통과했다.
+
+## 동시 활성 Ethernet 때문에 Wi-Fi 게이트웨이를 잘못 선택
+
+- 확인일: 2026-07-15
+- 증상: Wi-Fi를 `192.168.45.x` 네트워크로 전환해도 검색 결과 게이트웨이와 장비가 Ethernet의 `192.168.0.1` 기준으로 반복됐다.
+- 원인: `Get-NetIPConfiguration` 결과에서 기본 게이트웨이가 있는 첫 인터페이스를 골라, Ethernet과 Wi-Fi가 동시에 활성일 때 Ethernet이 선택됐다.
+- 해결: `NetAdapter.NdisPhysicalMedium == 9`인 활성 Wi-Fi 후보만 선택하고 Wi-Fi가 없으면 명시적 오류를 반환한다. 네트워크 행에는 서브넷 관측 수와 게이트웨이를 함께 표시한다.
+- 검증: Ethernet `192.168.0.1`과 Wi-Fi `192.168.45.1` 후보 단위 테스트, Ethernet-only 거부 테스트, 실제 Windows Wi-Fi 탐색, 전체 30개 테스트와 Windows release 빌드 통과.
+
+## 화면과 실행 파일의 빌드 버전 불일치
+
+- 확인일: 2026-07-15
+- 증상: 기능을 추가해 재빌드해도 대시보드가 계속 `v1.0.0`을 표시했다.
+- 원인: pubspec 버전과 대시보드 표시 상수가 별도로 고정되어 있었고 기능 빌드 과정에서 버전을 올리지 않았다.
+- 해결: 릴리스 버전을 `1.1.0+2`로 올리고 화면 표시, 위젯 테스트, Windows 실행 파일 버전을 일치시켰다.
+- 검증: Windows 실행 파일의 ProductVersion과 FileVersion이 모두 `1.1.0+2`이며 실행 프로세스가 정상 응답했다.

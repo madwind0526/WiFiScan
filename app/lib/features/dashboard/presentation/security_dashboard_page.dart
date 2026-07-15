@@ -21,7 +21,7 @@ import 'package:wifi_scan/features/network_profiles/infrastructure/platform_netw
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_backup_codec.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_transfer_file_service.dart';
 
-const String _buildVersion = 'v1.0.0';
+const String _buildVersion = 'v1.1.0+2';
 
 enum _DashboardSection { overview, networks, devices, findings }
 
@@ -2329,7 +2329,9 @@ class _NetworkRow extends StatelessWidget {
         ? '아직 스캔하지 않았습니다.'
         : record!.failed
         ? '연결하지 못했습니다.'
-        : '장비 ${record!.deviceIds.length}개 · ${_formatTimestamp(record!.scannedAt)}';
+        : '서브넷 관측 ${record!.deviceIds.length}개 · '
+              'GW ${record!.gateway ?? '-'} · '
+              '${_formatTimestamp(record!.scannedAt)}';
     return InkWell(
       onTap: record != null && !record!.failed ? onTap : null,
       child: Padding(
@@ -2752,11 +2754,7 @@ class _DeviceCardGrid extends StatelessWidget {
 }
 
 class _MeshCluster {
-  const _MeshCluster({
-    required this.label,
-    required this.members,
-    this.hub,
-  });
+  const _MeshCluster({required this.label, required this.members, this.hub});
 
   final String label;
   final NetworkDevice? hub;
@@ -2952,7 +2950,9 @@ class _MeshNetworkView extends StatelessWidget {
                     color: Theme.of(context).colorScheme.primary,
                   ),
                   const SizedBox(width: 8),
-                  Text(clusterCount > 1 ? '메시 보기 · 공유기 $clusterCount대' : '메시 보기'),
+                  Text(
+                    clusterCount > 1 ? '메시 보기 · 공유기 $clusterCount대' : '메시 보기',
+                  ),
                 ],
               ),
             ),

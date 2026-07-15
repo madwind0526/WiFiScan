@@ -10,10 +10,7 @@ void main() {
     Band                   : 5 GHz
     Channel                : 149
 ''';
-    expect(
-      WindowsNetworkConnectionService.parseBand(output),
-      WifiBand.ghz5,
-    );
+    expect(WindowsNetworkConnectionService.parseBand(output), WifiBand.ghz5);
   });
 
   test('reads an explicit Korean band field', () {
@@ -23,10 +20,7 @@ void main() {
     대역                   : 2.4 GHz
     채널                   : 6
 ''';
-    expect(
-      WindowsNetworkConnectionService.parseBand(output),
-      WifiBand.ghz24,
-    );
+    expect(WindowsNetworkConnectionService.parseBand(output), WifiBand.ghz24);
   });
 
   test('falls back to a 5 GHz channel number when band is absent', () {
@@ -34,10 +28,7 @@ void main() {
     SSID                   : madwind-H
     Channel                : 149
 ''';
-    expect(
-      WindowsNetworkConnectionService.parseBand(output),
-      WifiBand.ghz5,
-    );
+    expect(WindowsNetworkConnectionService.parseBand(output), WifiBand.ghz5);
   });
 
   test('falls back to a 2.4 GHz channel number when band is absent', () {
@@ -45,10 +36,7 @@ void main() {
     SSID                   : madwind-L
     Channel                : 6
 ''';
-    expect(
-      WindowsNetworkConnectionService.parseBand(output),
-      WifiBand.ghz24,
-    );
+    expect(WindowsNetworkConnectionService.parseBand(output), WifiBand.ghz24);
   });
 
   test('returns unknown when neither band nor channel is present', () {
@@ -56,9 +44,6 @@ void main() {
     SSID                   : madwind-H
     State                  : connected
 ''';
-    expect(
-      WindowsNetworkConnectionService.parseBand(output),
-      WifiBand.unknown,
-    );
+    expect(WindowsNetworkConnectionService.parseBand(output), WifiBand.unknown);
   });
 }

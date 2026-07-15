@@ -19,7 +19,8 @@ class WindowsNetworkConnectionService implements NetworkConnectionService {
     }
     final names = _parseProfileNames(result.stdout.toString());
     return [
-      for (final ssid in names) NetworkProfile(id: ssid, ssid: ssid, displayName: ssid),
+      for (final ssid in names)
+        NetworkProfile(id: ssid, ssid: ssid, displayName: ssid),
     ];
   }
 
@@ -37,11 +38,10 @@ class WindowsNetworkConnectionService implements NetworkConnectionService {
   /// [subcommand] — never interpolate an SSID or other untrusted value into
   /// it, since it is executed through a shell.
   Future<ProcessResult> _runNetshQuery(String subcommand) {
-    return Process.run(
-      'cmd',
-      ['/c', 'chcp 65001 >NUL && netsh $subcommand'],
-      stdoutEncoding: utf8,
-    );
+    return Process.run('cmd', [
+      '/c',
+      'chcp 65001 >NUL && netsh $subcommand',
+    ], stdoutEncoding: utf8);
   }
 
   /// Extracts profile names from `netsh wlan show profiles` output.
@@ -83,11 +83,10 @@ class WindowsNetworkConnectionService implements NetworkConnectionService {
       final result = await _runNetshQuery('wlan show networks');
       if (result.exitCode != 0) return const {};
       final names = <String>{};
-      for (final match
-          in RegExp(
-            r'^SSID\s+\d+\s*:\s*(.+)$',
-            multiLine: true,
-          ).allMatches(result.stdout.toString())) {
+      for (final match in RegExp(
+        r'^SSID\s+\d+\s*:\s*(.+)$',
+        multiLine: true,
+      ).allMatches(result.stdout.toString())) {
         final name = match.group(1)!.trim();
         if (name.isNotEmpty) names.add(name);
       }
@@ -124,8 +123,8 @@ class WindowsNetworkConnectionService implements NetworkConnectionService {
 
   /// Extracts the radio band from `netsh wlan show interfaces` output.
   ///
-  /// Prefers an explicit band field (English "Band" or Korean "대역"), then
-  /// falls back to the channel number. Handles localized Windows output.
+  /// Prefers an explicit localized band field, then falls back to the channel
+  /// number.
   static WifiBand parseBand(String output) {
     for (final line in output.split(RegExp(r'\r?\n'))) {
       final bandMatch = RegExp(
@@ -158,7 +157,8 @@ class WindowsNetworkConnectionService implements NetworkConnectionService {
   @override
   Future<void> connect(NetworkProfile profile) async {
     File? temporaryProfile;
-    final hasPassword = profile.password != null && profile.password!.isNotEmpty;
+    final hasPassword =
+        profile.password != null && profile.password!.isNotEmpty;
     final knownToWindows = hasPassword && await _profileExists(profile.ssid);
     if (hasPassword && !knownToWindows) {
       temporaryProfile = File(
