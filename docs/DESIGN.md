@@ -121,6 +121,10 @@ Ethernet과 Wi-Fi가 모두 `192.168.0.0/24`처럼 같은 서브넷에 있으면
 
 Windows ping에는 `-S <현재 Wi-Fi IPv4>`를 지정해 모든 probe의 출발 주소를 선택된 Wi-Fi 인터페이스에 고정한다. Ethernet은 인터넷 연결에 계속 사용할 수 있지만 WifiScan의 SSID 탐색 패킷에는 사용하지 않는다. 수정 릴리스 버전은 `1.1.1+3`이다.
 
+### Wave 13 자동 탐색 프로필 삭제 유지
+
+Windows 저장 WLAN 프로필은 앱 시작 시 자동으로 가져오지만, 사용자가 WifiScan에서 삭제한 SSID는 별도 로컬 제외 목록에 기록한다. 이후 Windows에 같은 프로필이 남아 있어도 자동 병합하지 않는다. 사용자가 프로필 편집창에서 같은 SSID를 직접 추가하거나 암호화 백업에서 가져오면 명시적 복원으로 간주해 제외를 해제한다. Windows 자체의 WLAN 프로필과 암호는 삭제하지 않는다. 수정 릴리스 버전은 `1.1.2+4`이다.
+
 ## Device Inventory Model
 
 - 내부 장비 ID
@@ -222,6 +226,7 @@ Router / subnet / NSD / mDNS / SSDP observations
 | 10 | mDNS·SSDP·역방향 DNS·제한된 TCP 서비스 정보 보강 | 완료 |
 | 11 | Windows Wi-Fi 전용 인터페이스 선택과 서브넷 관측 표현 | 완료 |
 | 12 | 동일 서브넷에서 탐색 패킷을 Wi-Fi 출발 주소에 고정 | 완료 |
+| 13 | 삭제한 Windows 자동 탐색 프로필의 재등록 방지 | 완료 |
 
 ## Verification Gates
 

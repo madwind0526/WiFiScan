@@ -21,7 +21,7 @@ import 'package:wifi_scan/features/network_profiles/infrastructure/platform_netw
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_backup_codec.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_transfer_file_service.dart';
 
-const String _buildVersion = 'v1.1.1+3';
+const String _buildVersion = 'v1.1.2+4';
 
 enum _DashboardSection { overview, networks, devices, findings }
 
@@ -121,9 +121,11 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     final stored = await _profileRepository.load();
     List<NetworkProfile> profiles = stored;
     try {
+      final suppressedSsids = await _profileRepository.loadSuppressedSsids();
       final available = await _connectionService.discoverAvailableProfiles();
       final known = {for (final profile in stored) profile.ssid: profile};
       for (final profile in available) {
+        if (suppressedSsids.contains(profile.ssid)) continue;
         known.putIfAbsent(profile.ssid, () => profile);
       }
       profiles = known.values.toList(growable: false);
@@ -715,6 +717,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     final profiles = _networkProfiles
         .where((item) => item.id != profile.id)
         .toList(growable: false);
+    await _profileRepository.suppressAutoDiscovery(profile.ssid);
     await _profileRepository.save(profiles);
     if (!mounted) return;
     setState(() {
@@ -738,6 +741,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       profile,
     ];
     await _profileRepository.save(merged);
+    await _profileRepository.allowAutoDiscovery(profile.ssid);
     if (!mounted) return;
     setState(() => _networkProfiles = merged);
   }
@@ -1384,6 +1388,9 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       }
       final profiles = merged.values.toList(growable: false);
       await _profileRepository.save(profiles);
+      for (final profile in imported) {
+        await _profileRepository.allowAutoDiscovery(profile.ssid);
+      }
       if (!mounted) return;
       setState(() {
         _networkProfiles = profiles;

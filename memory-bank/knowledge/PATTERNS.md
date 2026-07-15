@@ -43,3 +43,7 @@ Windows 창을 480×920 세로형으로 고정하고, 상단 58px 아이콘 바(
 ## Failure-Isolated Network Enrichment
 
 ICMP/neighbor 결과만으로 부족한 장비 정보를 역방향 DNS, mDNS/DNS-SD, SSDP/UPnP, 제한된 TCP 연결 확인 제공자로 보강한다. 각 제공자는 동일한 IP 기반 증거 모델을 반환하고 병렬 실행하며, 개별 실패는 전체 탐색을 실패시키지 않는다. SSDP 설명 문서는 기존 탐색 대상 IP의 HTTP 주소만 허용하고 리디렉션을 따르지 않아 임의 외부 요청을 막으며, TCP 확인은 연결 여부만 수집하고 애플리케이션 payload를 전송하지 않는다.
+
+## Suppression Tombstone for Auto-Discovered Profiles
+
+외부 소스에서 자동 병합하는 항목을 사용자가 삭제할 수 있어야 하면 단순 목록 삭제만으로는 부족하다. 삭제된 외부 키를 로컬 suppression tombstone으로 저장하고 자동 병합에서 제외한다. 사용자가 같은 키를 직접 추가하거나 가져올 때만 tombstone을 해제한다.

@@ -76,12 +76,62 @@ class NetworkProfileRepository {
     }
   }
 
+  Future<Set<String>> loadSuppressedSsids() async {
+    final file = await _suppressedFile();
+    if (!await file.exists()) return const {};
+    try {
+      final decoded = jsonDecode(await file.readAsString());
+      if (decoded is! List) return const {};
+      return decoded
+          .map((item) => item.toString().trim())
+          .where((ssid) => ssid.isNotEmpty)
+          .toSet();
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<void> suppressAutoDiscovery(String ssid) async {
+    final value = ssid.trim();
+    if (value.isEmpty) return;
+    final suppressed = {...await loadSuppressedSsids()};
+    suppressed.add(value);
+    await _writeSuppressedSsids(suppressed);
+  }
+
+  Future<void> allowAutoDiscovery(String ssid) async {
+    final value = ssid.trim();
+    if (value.isEmpty) return;
+    final suppressed = {...await loadSuppressedSsids()};
+    if (!suppressed.remove(value)) return;
+    await _writeSuppressedSsids(suppressed);
+  }
+
   Future<File> _file() async {
     if (fileProvider != null) return fileProvider!();
     final directory = await getApplicationSupportDirectory();
     return File(
       '${directory.path}${Platform.pathSeparator}network_profiles.json',
     );
+  }
+
+  Future<File> _suppressedFile() async {
+    final profileFile = await _file();
+    return File(
+      '${profileFile.parent.path}${Platform.pathSeparator}'
+      'network_profiles_suppressed.json',
+    );
+  }
+
+  Future<void> _writeSuppressedSsids(Set<String> values) async {
+    final file = await _suppressedFile();
+    await file.parent.create(recursive: true);
+    if (values.isEmpty) {
+      if (await file.exists()) await file.delete();
+      return;
+    }
+    final sorted = values.toList()..sort();
+    await file.writeAsString(jsonEncode(sorted), flush: true);
   }
 
   Future<Set<String>> _storedProfileIds(File file) async {

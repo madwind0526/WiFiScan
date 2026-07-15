@@ -2,10 +2,10 @@
 
 ## Current Wave
 
-- **Wave:** 12
+- **Wave:** 13
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-15 Wave 12 Wi-Fi 출발 주소 고정, 버전 1.1.1+3, analyze/31 tests/Windows 빌드 검증 완료
+- **Last Checkpoint:** 2026-07-15 Wave 13 삭제 프로필 suppression, 버전 1.1.2+4, analyze/33 tests/Windows 빌드 검증 완료
 
 ## Wave History
 
@@ -24,6 +24,7 @@
 | 10 | 비침투 네트워크 정보 보강과 서비스 기반 보안 안내 | Done |
 | 11 | Windows Wi-Fi 전용 탐색과 게이트웨이 오선택 수정 | Done |
 | 12 | 동일 서브넷 탐색 패킷의 Ethernet 우회 수정 | Done |
+| 13 | 삭제한 Windows 자동 탐색 프로필의 재등록 방지 | Done |
 
 ## Session Notes
 

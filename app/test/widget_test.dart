@@ -18,7 +18,7 @@ void main() {
     await tester.pumpWidget(const WifiScanApp());
 
     expect(find.text('WifiScan'), findsOneWidget);
-    expect(find.text('v1.1.1+3'), findsOneWidget);
+    expect(find.text('v1.1.2+4'), findsOneWidget);
     expect(find.byTooltip('설정'), findsOneWidget);
     expect(find.byTooltip('전체 네트워크 스캔'), findsOneWidget);
     expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);
@@ -168,6 +168,51 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('deleted Windows profiles stay suppressed after app reload', (
+    tester,
+  ) async {
+    final repository = _MemoryProfileRepository();
+    const discoveredProfile = NetworkProfile(
+      id: 'Auto-WiFi',
+      ssid: 'Auto-WiFi',
+      displayName: 'Auto-WiFi',
+    );
+    const connectionService = _FakeConnectionService(
+      availableProfiles: [discoveredProfile],
+    );
+
+    await tester.pumpWidget(
+      WifiScanApp(
+        connectionService: connectionService,
+        profileRepository: repository,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(repository.profiles, hasLength(1));
+
+    await tester.tap(find.byTooltip('네트워크 프로필'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('삭제'));
+    await tester.pumpAndSettle();
+    expect(repository.profiles, isEmpty);
+    expect(repository.suppressedSsids, contains('Auto-WiFi'));
+    await tester.tap(find.byTooltip('닫기'));
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(
+      WifiScanApp(
+        connectionService: connectionService,
+        profileRepository: repository,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(repository.profiles, isEmpty);
+
+    await tester.tap(find.byTooltip('네트워크 프로필'));
+    await tester.pumpAndSettle();
+    expect(find.text('Auto-WiFi'), findsNothing);
+  });
 
   testWidgets(
     'encrypted profile export and import support keyboard and large text',
@@ -376,10 +421,13 @@ class _SlowDiscoveryService implements NetworkDiscoveryService {
 }
 
 class _FakeConnectionService implements NetworkConnectionService {
-  const _FakeConnectionService();
+  const _FakeConnectionService({this.availableProfiles = const []});
+
+  final List<NetworkProfile> availableProfiles;
 
   @override
-  Future<List<NetworkProfile>> discoverAvailableProfiles() async => const [];
+  Future<List<NetworkProfile>> discoverAvailableProfiles() async =>
+      availableProfiles;
 
   @override
   Future<String?> currentSsid() async => null;
@@ -414,6 +462,7 @@ class _MemoryProfileRepository extends NetworkProfileRepository {
   }
 
   final List<NetworkProfile> profiles = [];
+  final Set<String> suppressedSsids = {};
 
   @override
   Future<List<NetworkProfile>> load() async => List.unmodifiable(profiles);
@@ -423,6 +472,19 @@ class _MemoryProfileRepository extends NetworkProfileRepository {
     profiles
       ..clear()
       ..addAll(value);
+  }
+
+  @override
+  Future<Set<String>> loadSuppressedSsids() async => {...suppressedSsids};
+
+  @override
+  Future<void> suppressAutoDiscovery(String ssid) async {
+    suppressedSsids.add(ssid);
+  }
+
+  @override
+  Future<void> allowAutoDiscovery(String ssid) async {
+    suppressedSsids.remove(ssid);
   }
 }
 

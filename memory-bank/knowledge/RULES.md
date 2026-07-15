@@ -58,6 +58,7 @@
 - 기존 `passwordEnc` 값은 보안 저장소 이전이 성공한 뒤에만 메타데이터 파일에서 제거한다.
 - 프로필 내보내기 암호는 8자 이상으로 입력·확인하고 앱에 저장하지 않는다.
 - 내보내기 파일은 무작위 salt/nonce, PBKDF2-HMAC-SHA256, AES-256-GCM을 사용하는 버전형 암호화 봉투로 만든다.
+- WifiScan에서 삭제한 Windows 자동 탐색 프로필은 재시작 후 자동 복원하지 않으며 Windows 자체 WLAN 프로필은 삭제하지 않는다.
 
 ## Service Evidence and Vulnerability Claims
 

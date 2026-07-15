@@ -65,6 +65,21 @@ void main() {
     expect(credentialStore.deletedIds, contains('Office-WiFi'));
   });
 
+  test('persists and clears automatic discovery suppression', () async {
+    await repository.suppressAutoDiscovery('Office-WiFi');
+
+    expect(await repository.loadSuppressedSsids(), {'Office-WiFi'});
+
+    final reloaded = NetworkProfileRepository(
+      credentialStore: credentialStore,
+      fileProvider: () async => profileFile,
+    );
+    expect(await reloaded.loadSuppressedSsids(), {'Office-WiFi'});
+
+    await reloaded.allowAutoDiscovery('Office-WiFi');
+    expect(await repository.loadSuppressedSsids(), isEmpty);
+  });
+
   test('migrates legacy passwordEnc values to secure storage', () async {
     final encrypted = await const ProfileCipher().encrypt('legacy-secret');
     await profileFile.writeAsString(
