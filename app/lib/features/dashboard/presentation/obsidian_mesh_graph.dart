@@ -16,10 +16,17 @@ class MeshGraphCluster {
 }
 
 class MeshGraphEdge {
-  const MeshGraphEdge(this.sourceId, this.targetId);
+  const MeshGraphEdge(
+    this.sourceId,
+    this.targetId, {
+    this.preferredDistance,
+    this.springStrength = 1,
+  });
 
   final String sourceId;
   final String targetId;
+  final double? preferredDistance;
+  final double springStrength;
 
   bool touches(String nodeId) => sourceId == nodeId || targetId == nodeId;
 
@@ -52,7 +59,7 @@ class MeshGraphLayoutEngine {
     final center = size.center(Offset.zero);
     final componentRadius = groupCount == 1
         ? 0.0
-        : math.min(size.width, size.height) * 0.27;
+        : math.min(size.width, size.height) * 0.11;
     final groupCenters = <int, Offset>{};
 
     for (final group in groups.values.toSet()) {
@@ -76,7 +83,7 @@ class MeshGraphLayoutEngine {
     }
 
     final iterations = nodeIds.length > 90 ? 90 : 150;
-    const margin = 58.0;
+    final boundaryRadius = math.min(size.width, size.height) * 0.40;
     for (var iteration = 0; iteration < iterations; iteration++) {
       final forces = {for (final id in nodeIds) id: Offset.zero};
 
@@ -100,18 +107,23 @@ class MeshGraphLayoutEngine {
         final delta = target - source;
         final distance = math.max(delta.distance, 1.0);
         final desiredDistance =
-            hubIds.contains(edge.sourceId) || hubIds.contains(edge.targetId)
-            ? 104.0
-            : 82.0;
+            edge.preferredDistance ??
+            (hubIds.contains(edge.sourceId) || hubIds.contains(edge.targetId)
+                ? 104.0
+                : 82.0);
         final spring =
-            delta / distance * ((distance - desiredDistance) * 0.035);
+            delta /
+            distance *
+            ((distance - desiredDistance) * 0.035 * edge.springStrength);
         forces[edge.sourceId] = forces[edge.sourceId]! + spring;
         forces[edge.targetId] = forces[edge.targetId]! - spring;
       }
 
       for (final id in nodeIds) {
         final target = groupCenters[groups[id] ?? 0] ?? center;
-        final gravity = (target - positions[id]!) * 0.008;
+        final gravity =
+            (target - positions[id]!) * 0.005 +
+            (center - positions[id]!) * 0.003;
         forces[id] = forces[id]! + gravity;
       }
 
@@ -121,11 +133,12 @@ class MeshGraphLayoutEngine {
         if (force.distance > temperature) {
           force = force / force.distance * temperature;
         }
-        final next = positions[id]! + force;
-        positions[id] = Offset(
-          next.dx.clamp(margin, size.width - margin),
-          next.dy.clamp(margin, size.height - margin),
-        );
+        var next = positions[id]! + force;
+        final fromCenter = next - center;
+        if (fromCenter.distance > boundaryRadius) {
+          next = center + fromCenter / fromCenter.distance * boundaryRadius;
+        }
+        positions[id] = next;
       }
     }
 
@@ -195,7 +208,7 @@ class _ObsidianMeshGraphState extends State<ObsidianMeshGraph> {
           _layoutKey = layoutKey;
           _layout = _layoutEngine.calculate(
             nodeIds: graph.devices.map((device) => device.id).toList(),
-            edges: graph.edges,
+            edges: _layoutEdges(graph),
             groups: graph.groups,
             hubIds: graph.hubIds,
             size: graphSize,
@@ -229,7 +242,6 @@ class _ObsidianMeshGraphState extends State<ObsidianMeshGraph> {
     final edgeKeys = <String>{};
     final groups = <String, int>{};
     final hubIds = <String>{};
-    final labels = <String, String>{};
 
     for (var index = 0; index < activeClusters.length; index++) {
       final cluster = activeClusters[index];
@@ -242,7 +254,6 @@ class _ObsidianMeshGraphState extends State<ObsidianMeshGraph> {
       final hub = cluster.hub;
       if (hub != null && byId.containsKey(hub.id)) {
         hubIds.add(hub.id);
-        if (cluster.label.isNotEmpty) labels[hub.id] = cluster.label;
         for (final device in members) {
           if (device.id == hub.id) continue;
           final key = [hub.id, device.id]..sort();
@@ -250,8 +261,6 @@ class _ObsidianMeshGraphState extends State<ObsidianMeshGraph> {
             edges.add(MeshGraphEdge(hub.id, device.id));
           }
         }
-      } else if (cluster.label.isNotEmpty && members.isNotEmpty) {
-        labels[members.first.id] = cluster.label;
       }
     }
 
@@ -264,8 +273,21 @@ class _ObsidianMeshGraphState extends State<ObsidianMeshGraph> {
       edges: edges,
       groups: groups,
       hubIds: hubIds,
-      labels: labels,
     );
+  }
+
+  List<MeshGraphEdge> _layoutEdges(_MeshGraphData graph) {
+    final hubs = graph.hubIds.toList()..sort();
+    return [
+      ...graph.edges,
+      for (var index = 1; index < hubs.length; index++)
+        MeshGraphEdge(
+          hubs[index - 1],
+          hubs[index],
+          preferredDistance: 120,
+          springStrength: 3,
+        ),
+    ];
   }
 
   NetworkDevice? _findHub(List<NetworkDevice> devices) {
@@ -339,49 +361,29 @@ class _ObsidianMeshGraphState extends State<ObsidianMeshGraph> {
                         ),
                       ),
                     ),
-                    for (final entry in graph.labels.entries)
-                      if (layout.positions[entry.key] case final position?)
-                        Positioned(
-                          left: position.dx - 72,
-                          top: position.dy - 53,
-                          width: 144,
-                          child: IgnorePointer(
-                            child: Text(
-                              entry.value,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: foreground.withValues(alpha: 0.62),
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ),
                     for (final device in graph.devices)
                       if (layout.positions[device.id] case final position?)
                         Positioned(
                           left: position.dx - 58,
-                          top: position.dy - 28,
+                          top: position.dy - 21,
                           width: 116,
                           height: 72,
                           child: _ObsidianGraphNode(
                             key: ValueKey('mesh-node-${device.id}'),
                             device: device,
                             isHub: graph.hubIds.contains(device.id),
-                            isNew: widget.newDeviceIds.contains(device.id),
                             isFocused: focusedId == device.id,
                             isRelated:
                                 focusedId == null ||
                                 relatedIds.contains(device.id),
                             showLabel:
-                                graph.devices.length <= 32 ||
-                                focusedId == device.id ||
-                                graph.hubIds.contains(device.id) ||
-                                device.sources.contains(
-                                  DiscoverySource.localInterface,
-                                ),
+                                _hasGraphLabel(device) &&
+                                (graph.devices.length <= 32 ||
+                                    focusedId == device.id ||
+                                    graph.hubIds.contains(device.id) ||
+                                    device.sources.contains(
+                                      DiscoverySource.localInterface,
+                                    )),
                             isDark: isDark,
                             onEnter: () =>
                                 setState(() => _hoveredId = device.id),
@@ -420,8 +422,8 @@ class _ObsidianMeshGraphState extends State<ObsidianMeshGraph> {
                     children: [
                       Text(
                         graph.groups.values.toSet().length > 1
-                            ? '메시 그래프 · 네트워크 ${graph.groups.values.toSet().length}개'
-                            : '메시 그래프',
+                            ? 'Mesh · ${graph.groups.values.toSet().length} nets'
+                            : 'Mesh',
                         style: TextStyle(
                           color: foreground,
                           fontSize: 12,
@@ -429,7 +431,7 @@ class _ObsidianMeshGraphState extends State<ObsidianMeshGraph> {
                         ),
                       ),
                       Text(
-                        '${graph.devices.length}개 노드 · ${graph.edges.length}개 관계',
+                        '${graph.devices.length} nodes · ${graph.edges.length} links',
                         style: TextStyle(
                           color: foreground.withValues(alpha: 0.62),
                           fontSize: 10,
@@ -454,7 +456,7 @@ class _ObsidianMeshGraphState extends State<ObsidianMeshGraph> {
           ),
           Positioned(
             right: 10,
-            top: 52,
+            bottom: widget.framed ? 42 : 34,
             child: _GraphLegend(
               background: background,
               foreground: foreground,
@@ -476,7 +478,7 @@ class _ObsidianMeshGraphState extends State<ObsidianMeshGraph> {
                     vertical: 5,
                   ),
                   child: Text(
-                    '드래그로 이동 · 스크롤로 확대 · 노드를 눌러 상세 확인',
+                    'Drag · Scroll to zoom · Click for details',
                     style: TextStyle(
                       color: foreground.withValues(alpha: 0.62),
                       fontSize: 9,
@@ -503,7 +505,11 @@ class _ObsidianMeshGraphState extends State<ObsidianMeshGraph> {
     _fitScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fitScheduled = false;
-      if (mounted) _fitGraph();
+      if (!mounted) return;
+      _fitGraph();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _fitGraph();
+      });
     });
   }
 
@@ -538,14 +544,12 @@ class _MeshGraphData {
     required this.edges,
     required this.groups,
     required this.hubIds,
-    required this.labels,
   });
 
   final List<NetworkDevice> devices;
   final List<MeshGraphEdge> edges;
   final Map<String, int> groups;
   final Set<String> hubIds;
-  final Map<String, String> labels;
 }
 
 class _ObsidianGraphPainter extends CustomPainter {
@@ -603,7 +607,6 @@ class _ObsidianGraphNode extends StatelessWidget {
     super.key,
     required this.device,
     required this.isHub,
-    required this.isNew,
     required this.isFocused,
     required this.isRelated,
     required this.showLabel,
@@ -615,7 +618,6 @@ class _ObsidianGraphNode extends StatelessWidget {
 
   final NetworkDevice device;
   final bool isHub;
-  final bool isNew;
   final bool isFocused;
   final bool isRelated;
   final bool showLabel;
@@ -645,7 +647,7 @@ class _ObsidianGraphNode extends StatelessWidget {
       child: Tooltip(
         waitDuration: const Duration(milliseconds: 250),
         message: [
-          device.displayName,
+          if (_hasGraphLabel(device)) device.displayName,
           if (device.ipAddresses.isNotEmpty) device.ipAddresses.join(', '),
         ].join('\n'),
         child: Semantics(
@@ -666,6 +668,7 @@ class _ObsidianGraphNode extends StatelessWidget {
                       width: 44,
                       height: 42,
                       child: Stack(
+                        clipBehavior: Clip.none,
                         alignment: Alignment.center,
                         children: [
                           AnimatedContainer(
@@ -674,50 +677,15 @@ class _ObsidianGraphNode extends StatelessWidget {
                             height: diameter + (isFocused ? 6 : 0),
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              gradient: RadialGradient(
-                                center: const Alignment(-0.34, -0.38),
-                                radius: 0.86,
-                                colors: [
-                                  Color.lerp(Colors.white, color, 0.28)!,
-                                  color,
-                                  Color.lerp(color, Colors.black, 0.48)!,
-                                ],
-                                stops: const [0, 0.46, 1],
-                              ),
+                              color: color,
                               border: Border.all(
                                 color: isFocused
-                                    ? Color.lerp(Colors.white, color, 0.30)!
-                                    : color.withValues(alpha: 0.78),
+                                    ? Colors.white.withValues(alpha: 0.92)
+                                    : color,
                                 width: isFocused ? 2.4 : 1,
                               ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: color.withValues(
-                                    alpha: isFocused ? 0.48 : 0.24,
-                                  ),
-                                  blurRadius: isFocused ? 13 : 7,
-                                  spreadRadius: isFocused ? 2 : 0,
-                                ),
-                                const BoxShadow(
-                                  color: Color(0x66000000),
-                                  offset: Offset(1.5, 2.5),
-                                  blurRadius: 4,
-                                ),
-                              ],
                             ),
                           ),
-                          if (isNew)
-                            Positioned(
-                              right: 1,
-                              top: 1,
-                              child: DecoratedBox(
-                                decoration: const BoxDecoration(
-                                  color: Color(0xFFFF5A67),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const SizedBox.square(dimension: 8),
-                              ),
-                            ),
                         ],
                       ),
                     ),
@@ -725,7 +693,7 @@ class _ObsidianGraphNode extends StatelessWidget {
                       SizedBox(
                         width: 112,
                         child: Text(
-                          device.displayName,
+                          _shortGraphLabel(device.displayName),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           textAlign: TextAlign.center,
@@ -830,12 +798,11 @@ class _GraphLegend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const entries = [
-      (_GraphVisualCategory.router, 'Wi-Fi 공유기'),
+      (_GraphVisualCategory.router, 'WiFi'),
       (_GraphVisualCategory.computer, 'PC'),
-      (_GraphVisualCategory.phone, '핸드폰'),
-      (_GraphVisualCategory.television, '모니터/TV'),
-      (_GraphVisualCategory.appliance, '가전제품'),
-      (_GraphVisualCategory.other, '기타'),
+      (_GraphVisualCategory.phone, 'Phone'),
+      (_GraphVisualCategory.television, 'TV'),
+      (_GraphVisualCategory.appliance, 'Home'),
     ];
     return IgnorePointer(
       child: Material(
@@ -846,35 +813,37 @@ class _GraphLegend extends StatelessWidget {
           child: MediaQuery.withClampedTextScaling(
             maxScaleFactor: 1.25,
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(
-                  '범례',
-                  style: TextStyle(
-                    color: foreground.withValues(alpha: 0.76),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 5),
                 for (final entry in entries)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 5),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        _LegendSphere(
-                          color: _categoryColor(entry.$1, isDark),
-                          diameter: entry.$1 == _GraphVisualCategory.router
-                              ? 13
-                              : 10,
+                        SizedBox(
+                          width: 40,
+                          child: Text(
+                            entry.$2,
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                              color: foreground.withValues(alpha: 0.72),
+                              fontSize: 9,
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 6),
-                        Text(
-                          entry.$2,
-                          style: TextStyle(
-                            color: foreground.withValues(alpha: 0.72),
-                            fontSize: 9,
+                        SizedBox(
+                          width: 13,
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: _LegendCircle(
+                              key: ValueKey('legend-circle-${entry.$1.name}'),
+                              color: _categoryColor(entry.$1, isDark),
+                              diameter: entry.$1 == _GraphVisualCategory.router
+                                  ? 13
+                                  : 10,
+                            ),
                           ),
                         ),
                       ],
@@ -889,8 +858,8 @@ class _GraphLegend extends StatelessWidget {
   }
 }
 
-class _LegendSphere extends StatelessWidget {
-  const _LegendSphere({required this.color, required this.diameter});
+class _LegendCircle extends StatelessWidget {
+  const _LegendCircle({super.key, required this.color, required this.diameter});
 
   final Color color;
   final double diameter;
@@ -898,25 +867,7 @@ class _LegendSphere extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: RadialGradient(
-          center: const Alignment(-0.34, -0.38),
-          colors: [
-            Color.lerp(Colors.white, color, 0.28)!,
-            color,
-            Color.lerp(color, Colors.black, 0.48)!,
-          ],
-          stops: const [0, 0.48, 1],
-        ),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x55000000),
-            offset: Offset(1, 1.5),
-            blurRadius: 2,
-          ),
-        ],
-      ),
+      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
       child: SizedBox.square(dimension: diameter),
     );
   }
@@ -965,4 +916,15 @@ int _stableHash(String value) {
     hash = (hash * 16777619) & 0x7fffffff;
   }
   return hash;
+}
+
+bool _hasGraphLabel(NetworkDevice device) {
+  return device.displayName.trim().isNotEmpty &&
+      device.displayName != '확인되지 않은 장비';
+}
+
+String _shortGraphLabel(String value) {
+  final characters = value.trim().runes.toList(growable: false);
+  if (characters.length <= 5) return value.trim();
+  return '${String.fromCharCodes(characters.take(5))}...';
 }

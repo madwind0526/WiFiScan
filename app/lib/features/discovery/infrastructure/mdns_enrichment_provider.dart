@@ -9,6 +9,7 @@ class MdnsEnrichmentProvider implements NetworkEnrichmentProvider {
   const MdnsEnrichmentProvider({
     this.queryTimeout = const Duration(milliseconds: 700),
     this.maxInstances = 32,
+    this.maxServiceTypes = 40,
     this.maxConcurrentResolutions = 8,
   });
 
@@ -30,6 +31,7 @@ class MdnsEnrichmentProvider implements NetworkEnrichmentProvider {
 
   final Duration queryTimeout;
   final int maxInstances;
+  final int maxServiceTypes;
   final int maxConcurrentResolutions;
 
   @override
@@ -43,8 +45,21 @@ class MdnsEnrichmentProvider implements NetworkEnrichmentProvider {
         interfacesFactory: _privateIpv4Interfaces,
         onError: (_) {},
       );
+      final advertisedTypes = await client
+          .lookup<PtrResourceRecord>(
+            ResourceRecordQuery.serverPointer('_services._dns-sd._udp.local'),
+            timeout: queryTimeout,
+          )
+          .map((record) => _normalizeServiceType(record.domainName))
+          .where((value) => value != null)
+          .map((value) => value!)
+          .toList();
+      final serviceTypes = {
+        ..._serviceTypes,
+        ...advertisedTypes,
+      }.take(maxServiceTypes).toList(growable: false);
       final pointerBatches = await Future.wait([
-        for (final serviceType in _serviceTypes)
+        for (final serviceType in serviceTypes)
           client
               .lookup<PtrResourceRecord>(
                 ResourceRecordQuery.serverPointer(serviceType),
@@ -55,7 +70,7 @@ class MdnsEnrichmentProvider implements NetworkEnrichmentProvider {
       final pointers = <String, (PtrResourceRecord, String)>{};
       var serviceIndex = 0;
       for (final batch in pointerBatches) {
-        final serviceType = _serviceTypes.elementAt(serviceIndex++);
+        final serviceType = serviceTypes[serviceIndex++];
         for (final pointer in batch) {
           pointers[pointer.domainName] = (pointer, serviceType);
         }
@@ -157,7 +172,9 @@ class MdnsEnrichmentProvider implements NetworkEnrichmentProvider {
               NetworkServiceObservation(
                 protocol: _protocolFor(serviceType),
                 port: service.port,
-                transport: NetworkTransport.tcp,
+                transport: serviceType.contains('._udp.')
+                    ? NetworkTransport.udp
+                    : NetworkTransport.tcp,
                 source: DiscoverySource.mdns,
                 product: _txtValue(txt, const ['product', 'fn']),
               ),
@@ -197,20 +214,50 @@ class MdnsEnrichmentProvider implements NetworkEnrichmentProvider {
   }
 
   DeviceCategory? _categoryFor(String serviceType) {
-    if (serviceType.contains('ipp') || serviceType.contains('printer')) {
+    final value = serviceType.toLowerCase();
+    if (value.contains('ipp') || value.contains('printer')) {
       return DeviceCategory.printer;
     }
-    if (serviceType.contains('googlecast') || serviceType.contains('airplay')) {
+    if (value.contains('googlecast') ||
+        value.contains('airplay') ||
+        value.contains('androidtv') ||
+        value.contains('roku') ||
+        value.contains('dial')) {
       return DeviceCategory.television;
     }
-    if (serviceType.contains('raop')) return DeviceCategory.speaker;
-    if (serviceType.contains('hap') || serviceType.contains('homekit')) {
+    if (value.contains('raop') ||
+        value.contains('sonos') ||
+        value.contains('spotify')) {
+      return DeviceCategory.speaker;
+    }
+    if (value.contains('hap') ||
+        value.contains('homekit') ||
+        value.contains('matter') ||
+        value.contains('miio') ||
+        value.contains('ewelink') ||
+        value.contains('smartthings')) {
       return DeviceCategory.iot;
     }
-    if (serviceType.contains('workstation') || serviceType.contains('smb')) {
+    if (value.contains('workstation') ||
+        value.contains('smb') ||
+        value.contains('rdp')) {
       return DeviceCategory.computer;
     }
+    if (value.contains('camera') || value.contains('rtsp')) {
+      return DeviceCategory.camera;
+    }
+    if (value.contains('mobdev') || value.contains('iphone')) {
+      return DeviceCategory.phone;
+    }
     return null;
+  }
+
+  String? _normalizeServiceType(String value) {
+    final normalized = value.replaceFirst(RegExp(r'\.$'), '').toLowerCase();
+    final valid = RegExp(
+      r'^_[a-z0-9-]+\._(?:tcp|udp)\.local$',
+    ).hasMatch(normalized);
+    return valid ? normalized : null;
   }
 
   String? _txtValue(String text, List<String> keys) {

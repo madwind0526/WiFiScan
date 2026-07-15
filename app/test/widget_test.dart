@@ -18,7 +18,7 @@ void main() {
     await tester.pumpWidget(const WifiScanApp());
 
     expect(find.text('WifiScan'), findsOneWidget);
-    expect(find.text('v1.2.0+5'), findsOneWidget);
+    expect(find.text('v1.2.1+6'), findsOneWidget);
     expect(find.byTooltip('설정'), findsOneWidget);
     expect(find.byTooltip('전체 네트워크 스캔'), findsOneWidget);
     expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);
@@ -43,19 +43,19 @@ void main() {
     expect(find.textContaining('검색이 완료되었습니다.'), findsOneWidget);
     await tester.tap(find.byTooltip('장비'));
     await tester.pumpAndSettle();
-    expect(find.text('메시 그래프'), findsOneWidget);
+    expect(find.text('Mesh'), findsOneWidget);
     expect(find.text('장비 검색'), findsOneWidget);
     await tester.tap(find.byTooltip('목록'));
     await tester.pumpAndSettle();
-    expect(find.text('이 Windows 컴퓨터'), findsOneWidget);
-    expect(find.text('기본 게이트웨이'), findsOneWidget);
-    await tester.tap(find.text('이 Windows 컴퓨터'));
+    expect(find.text('내 PC'), findsOneWidget);
+    expect(find.text('GW'), findsOneWidget);
+    await tester.tap(find.text('내 PC'));
     await tester.pumpAndSettle();
     expect(find.text('식별 신뢰도'), findsOneWidget);
     expect(find.text('MAC 주소'), findsOneWidget);
     await tester.tap(find.byTooltip('닫기'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('기본 게이트웨이'));
+    await tester.tap(find.text('GW'));
     await tester.pumpAndSettle();
     expect(find.text('A6004NS-M'), findsOneWidget);
     expect(find.textContaining('HTTP 80/tcp'), findsOneWidget);
@@ -78,6 +78,39 @@ void main() {
     await tester.pump(const Duration(milliseconds: 20));
     expect(find.text('검색을 중지했습니다.'), findsOneWidget);
     expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);
+  });
+
+  testWidgets('allows the user to dismiss a translucent error message', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await tester.pumpWidget(
+      const WifiScanApp(
+        discoveryService: _FailingDiscoveryService(),
+        connectionService: _FakeConnectionService(),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('현재 네트워크 검색 시작').first);
+    await tester.pumpAndSettle();
+
+    const errorMessage = '3개 네트워크를 확인했습니다. 1개 네트워크는 연결하지 못했습니다.';
+    final messageFinder = find.text(errorMessage);
+    expect(messageFinder, findsOneWidget);
+    expect(find.byTooltip('오류 메시지 닫기'), findsOneWidget);
+    final card = tester.widget<Card>(
+      find.ancestor(of: messageFinder, matching: find.byType(Card)).first,
+    );
+    expect(card.color!.a, lessThan(1));
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byKey(const ValueKey('message-panel-close')));
+    await tester.pump();
+    expect(messageFinder, findsNothing);
   });
 
   testWidgets('supports a small screen without layout exceptions', (
@@ -360,7 +393,7 @@ class _FakeDiscoveryService implements NetworkDiscoveryService {
       devices: [
         NetworkDevice(
           id: 'local:192.168.0.30',
-          displayName: '이 Windows 컴퓨터',
+          displayName: '내 PC',
           category: DeviceCategory.computer,
           ownershipStatus: OwnershipStatus.confirmed,
           ipAddresses: const ['192.168.0.30'],
@@ -371,7 +404,7 @@ class _FakeDiscoveryService implements NetworkDiscoveryService {
         ),
         NetworkDevice(
           id: 'router:192.168.0.1',
-          displayName: '기본 게이트웨이',
+          displayName: 'GW',
           category: DeviceCategory.router,
           ownershipStatus: OwnershipStatus.unconfirmed,
           ipAddresses: const ['192.168.0.1'],
@@ -417,6 +450,20 @@ class _SlowDiscoveryService implements NetworkDiscoveryService {
       await Future<void>.delayed(const Duration(milliseconds: 5));
     }
     throw const DiscoveryCancelledException();
+  }
+}
+
+class _FailingDiscoveryService implements NetworkDiscoveryService {
+  const _FailingDiscoveryService();
+
+  @override
+  Future<DiscoveryResult> discover({
+    required DiscoveryCancellationToken cancellationToken,
+    required void Function(DiscoveryProgress progress) onProgress,
+  }) async {
+    throw const DiscoveryUnavailableException(
+      '3개 네트워크를 확인했습니다. 1개 네트워크는 연결하지 못했습니다.',
+    );
   }
 }
 

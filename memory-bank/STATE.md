@@ -2,10 +2,10 @@
 
 ## Current Wave
 
-- **Wave:** 14
+- **Wave:** 15
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-15 Wave 14 입체 구 메시 그래프, analyze/35 tests/Windows v1.2.0+5 실행 검증 완료
+- **Last Checkpoint:** 2026-07-16 Wave 15 단색 다중 GW 메시, 반투명 오류 배너, 공개 장비 식별 보강, analyze/40 tests/Windows v1.2.1+6 실행 검증 완료
 
 ## Wave History
 
@@ -26,6 +26,7 @@
 | 12 | 동일 서브넷 탐색 패킷의 Ethernet 우회 수정 | Done |
 | 13 | 삭제한 Windows 자동 탐색 프로필의 재등록 방지 | Done |
 | 14 | 장비 유형별 입체 구와 Obsidian 스타일 힘 기반 메시 그래프 | Done |
+| 15 | 단색 다중 GW 메시, 닫을 수 있는 오류 배너, DNS-SD/NetBIOS 식별 보강 | Done |
 
 ## Session Notes
 

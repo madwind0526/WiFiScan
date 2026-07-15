@@ -19,6 +19,7 @@ enum DiscoverySource {
   neighbor,
   subnet,
   reverseDns,
+  netbios,
   mdns,
   ssdp,
   serviceProbe,

@@ -22,7 +22,7 @@ import 'package:wifi_scan/features/network_profiles/infrastructure/platform_netw
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_backup_codec.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_transfer_file_service.dart';
 
-const String _buildVersion = 'v1.2.0+5';
+const String _buildVersion = 'v1.2.1+6';
 
 enum _DashboardSection { overview, networks, devices, findings }
 
@@ -800,6 +800,13 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     });
   }
 
+  void _dismissMessage() {
+    setState(() {
+      _message = null;
+      _messageIsError = false;
+    });
+  }
+
   @override
   void dispose() {
     _cancellationToken?.cancel();
@@ -889,7 +896,11 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
               child: Column(
                 children: [
                   if (_message != null)
-                    _MessagePanel(message: _message!, isError: _messageIsError),
+                    _MessagePanel(
+                      message: _message!,
+                      isError: _messageIsError,
+                      onDismiss: _messageIsError ? _dismissMessage : null,
+                    ),
                   if (_progress != null && _isScanning) ...[
                     const SizedBox(height: 8),
                     Text(
@@ -981,7 +992,11 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       ),
       if (_message != null) ...[
         const SizedBox(height: 12),
-        _MessagePanel(message: _message!, isError: _messageIsError),
+        _MessagePanel(
+          message: _message!,
+          isError: _messageIsError,
+          onDismiss: _messageIsError ? _dismissMessage : null,
+        ),
       ],
       if (_isScanning && _progress != null) ...[
         const SizedBox(height: 10),
@@ -3217,19 +3232,59 @@ class _EmptyPanel extends StatelessWidget {
 }
 
 class _MessagePanel extends StatelessWidget {
-  const _MessagePanel({required this.message, required this.isError});
+  const _MessagePanel({
+    required this.message,
+    required this.isError,
+    this.onDismiss,
+  });
 
   final String message;
   final bool isError;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final foreground = isError
+        ? (isDark ? colorScheme.onError : colorScheme.error)
+        : colorScheme.onSecondaryContainer;
     return Card(
       color: isError
-          ? colorScheme.errorContainer
+          ? colorScheme.error.withValues(alpha: isDark ? 0.68 : 0.16)
           : colorScheme.secondaryContainer,
-      child: Padding(padding: const EdgeInsets.all(16), child: Text(message)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: isError
+            ? BorderSide(color: colorScheme.error.withValues(alpha: 0.55))
+            : BorderSide.none,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(message, style: TextStyle(color: foreground)),
+            ),
+            if (onDismiss != null) ...[
+              const SizedBox(width: 8),
+              IconButton(
+                key: const ValueKey('message-panel-close'),
+                onPressed: onDismiss,
+                icon: const Icon(Icons.close),
+                iconSize: 20,
+                color: foreground,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 32,
+                  height: 32,
+                ),
+                tooltip: '오류 메시지 닫기',
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -3305,6 +3360,7 @@ String _sourceLabel(DiscoverySource source) => switch (source) {
   DiscoverySource.neighbor => '이웃 테이블',
   DiscoverySource.subnet => '서브넷 탐색',
   DiscoverySource.reverseDns => '역방향 DNS',
+  DiscoverySource.netbios => 'NetBIOS',
   DiscoverySource.mdns => 'mDNS',
   DiscoverySource.ssdp => 'SSDP',
   DiscoverySource.serviceProbe => '서비스 확인',

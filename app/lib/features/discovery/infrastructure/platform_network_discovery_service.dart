@@ -9,6 +9,7 @@ import 'package:wifi_scan/features/discovery/infrastructure/mdns_enrichment_prov
 import 'package:wifi_scan/features/discovery/infrastructure/reverse_dns_enrichment_provider.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/ssdp_enrichment_provider.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/tcp_service_probe_provider.dart';
+import 'package:wifi_scan/features/discovery/infrastructure/windows_netbios_enrichment_provider.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/windows_network_discovery_service.dart';
 
 NetworkDiscoveryService createNetworkDiscoveryService() {
@@ -25,12 +26,13 @@ NetworkDiscoveryService createNetworkDiscoveryService() {
     enrichmentLease: Platform.isAndroid
         ? const AndroidMulticastEnrichmentLease()
         : const NetworkEnrichmentLease(),
-    enricher: const NetworkInformationEnricher(
+    enricher: NetworkInformationEnricher(
       providers: [
-        ReverseDnsEnrichmentProvider(),
-        MdnsEnrichmentProvider(),
-        SsdpEnrichmentProvider(),
-        TcpServiceProbeProvider(),
+        const ReverseDnsEnrichmentProvider(),
+        const MdnsEnrichmentProvider(),
+        const SsdpEnrichmentProvider(),
+        const TcpServiceProbeProvider(),
+        if (Platform.isWindows) const WindowsNetbiosEnrichmentProvider(),
       ],
     ),
   );

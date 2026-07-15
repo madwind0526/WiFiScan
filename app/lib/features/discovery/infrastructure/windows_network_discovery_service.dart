@@ -67,7 +67,7 @@ class WindowsNetworkDiscoveryService implements NetworkDiscoveryService {
     final devices = <NetworkDevice>[
       NetworkDevice(
         id: 'local:${rawContext.ipv4Address}',
-        displayName: '이 Windows 컴퓨터',
+        displayName: '내 PC',
         category: DeviceCategory.computer,
         ownershipStatus: OwnershipStatus.confirmed,
         ipAddresses: [rawContext.ipv4Address],
@@ -80,7 +80,7 @@ class WindowsNetworkDiscoveryService implements NetworkDiscoveryService {
         (neighbor) => NetworkDevice(
           id: neighbor.macAddress ?? 'ip:${neighbor.ipAddress}',
           displayName: neighbor.ipAddress == rawContext.gateway
-              ? '기본 게이트웨이'
+              ? 'GW'
               : '확인되지 않은 장비',
           category: neighbor.ipAddress == rawContext.gateway
               ? DeviceCategory.router

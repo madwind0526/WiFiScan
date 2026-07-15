@@ -38,7 +38,50 @@ void main() {
     }
   });
 
-  testWidgets('shows sphere legend and opens the tapped device', (
+  test('multiple networks share one circular graph boundary', () {
+    const engine = MeshGraphLayoutEngine();
+    const ids = ['gw-a', 'a1', 'a2', 'gw-b', 'b1', 'b2'];
+    const groups = {'gw-a': 0, 'a1': 0, 'a2': 0, 'gw-b': 1, 'b1': 1, 'b2': 1};
+    const size = Size(700, 700);
+    final layout = engine.calculate(
+      nodeIds: ids,
+      edges: const [
+        MeshGraphEdge('gw-a', 'a1'),
+        MeshGraphEdge('gw-a', 'a2'),
+        MeshGraphEdge('gw-b', 'b1'),
+        MeshGraphEdge('gw-b', 'b2'),
+        MeshGraphEdge(
+          'gw-a',
+          'gw-b',
+          preferredDistance: 120,
+          springStrength: 3,
+        ),
+      ],
+      groups: groups,
+      hubIds: const {'gw-a', 'gw-b'},
+      size: size,
+    );
+    final center = size.center(Offset.zero);
+    for (final position in layout.positions.values) {
+      expect((position - center).distance, lessThanOrEqualTo(280.001));
+    }
+    Offset centroid(int group) {
+      final points = [
+        for (final entry in layout.positions.entries)
+          if (groups[entry.key] == group) entry.value,
+      ];
+      return Offset(
+        points.map((point) => point.dx).reduce((a, b) => a + b) / points.length,
+        points.map((point) => point.dy).reduce((a, b) => a + b) / points.length,
+      );
+    }
+
+    final groupDistance = (centroid(0) - centroid(1)).distance;
+    expect(groupDistance, greaterThan(55));
+    expect(groupDistance, lessThan(190));
+  });
+
+  testWidgets('shows solid circle legend and opens the tapped device', (
     tester,
   ) async {
     final devices = [
@@ -46,8 +89,8 @@ void main() {
       _device('pc', '내 PC', DeviceCategory.computer, '192.168.0.2'),
       _device('phone', '핸드폰', DeviceCategory.phone, '192.168.0.3'),
       _device('tv', '거실 TV', DeviceCategory.television, '192.168.0.4'),
-      _device('appliance', '공기청정기', DeviceCategory.appliance, '192.168.0.5'),
-      _device('other', '확인 필요', DeviceCategory.unknown, '192.168.0.6'),
+      _device('appliance', '스마트공기청정기', DeviceCategory.appliance, '192.168.0.5'),
+      _device('other', '확인되지 않은 장비', DeviceCategory.unknown, '192.168.0.6'),
     ];
     NetworkDevice? tapped;
 
@@ -70,13 +113,24 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('메시 그래프'), findsOneWidget);
-    expect(find.text('Wi-Fi 공유기'), findsOneWidget);
+    expect(find.text('Mesh'), findsOneWidget);
+    expect(find.text('WiFi'), findsOneWidget);
     expect(find.text('PC'), findsOneWidget);
-    expect(find.text('핸드폰'), findsWidgets);
-    expect(find.text('모니터/TV'), findsOneWidget);
-    expect(find.text('가전제품'), findsOneWidget);
-    expect(find.text('기타'), findsOneWidget);
+    expect(find.text('Phone'), findsOneWidget);
+    expect(find.text('TV'), findsOneWidget);
+    expect(find.text('Home'), findsOneWidget);
+    expect(find.text('스마트공기청정기'), findsNothing);
+    expect(find.text('스마트공기...'), findsOneWidget);
+    expect(find.text('범례'), findsNothing);
+    expect(find.text('확인되지 않은 장비'), findsNothing);
+    final labelRight = tester.getTopRight(find.text('WiFi')).dx;
+    for (final label in ['PC', 'Phone', 'TV', 'Home']) {
+      expect(tester.getTopRight(find.text(label)).dx, closeTo(labelRight, 0.1));
+    }
+    expect(
+      tester.getCenter(find.byKey(const ValueKey('legend-circle-router'))).dx,
+      greaterThan(labelRight),
+    );
     expect(find.byKey(const ValueKey('mesh-zoom-in')), findsOneWidget);
     expect(find.byKey(const ValueKey('mesh-fit')), findsOneWidget);
 

@@ -122,7 +122,7 @@ class AndroidNetworkDiscoveryService implements NetworkDiscoveryService {
       if (context.gateway.isNotEmpty)
         NetworkDevice(
           id: 'ip:${context.gateway}',
-          displayName: '기본 게이트웨이',
+          displayName: 'GW',
           category: DeviceCategory.router,
           ownershipStatus: OwnershipStatus.unconfirmed,
           ipAddresses: [context.gateway],

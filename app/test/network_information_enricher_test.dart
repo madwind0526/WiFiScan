@@ -56,6 +56,48 @@ void main() {
       expect(device.identityConfidence, closeTo(0.7, 0.001));
     },
   );
+
+  test('classifies a known set-top model from advertised evidence', () async {
+    final now = DateTime(2026, 7, 16);
+    final result = DiscoveryResult(
+      context: const NetworkContext(
+        interfaceName: 'Wi-Fi',
+        interfaceIndex: 1,
+        ipv4Address: '192.168.0.10',
+        prefixLength: 24,
+        gateway: '192.168.0.1',
+        scannedNetwork: '192.168.0.0',
+        scannedPrefixLength: 24,
+        coverageLimited: false,
+      ),
+      devices: [
+        NetworkDevice(
+          id: 'set-top',
+          displayName: '확인되지 않은 장비',
+          category: DeviceCategory.unknown,
+          ownershipStatus: OwnershipStatus.unconfirmed,
+          ipAddresses: const ['192.168.0.30'],
+          sources: const [DiscoverySource.neighbor],
+          firstSeenAt: now,
+          lastSeenAt: now,
+          identityConfidence: 0.6,
+        ),
+      ],
+      limitations: const [],
+      duration: Duration.zero,
+    );
+    const enricher = NetworkInformationEnricher(
+      providers: [_SetTopEnrichmentProvider()],
+    );
+
+    final enriched = await enricher.enrich(
+      result,
+      cancellationToken: DiscoveryCancellationToken(),
+    );
+
+    expect(enriched.devices.single.displayName, 'BID-AT200');
+    expect(enriched.devices.single.category, DeviceCategory.television);
+  });
 }
 
 class _FakeEnrichmentProvider implements NetworkEnrichmentProvider {
@@ -97,5 +139,23 @@ class _FailingEnrichmentProvider implements NetworkEnrichmentProvider {
     required DiscoveryCancellationToken cancellationToken,
   }) {
     throw StateError('Test provider failure');
+  }
+}
+
+class _SetTopEnrichmentProvider implements NetworkEnrichmentProvider {
+  const _SetTopEnrichmentProvider();
+
+  @override
+  Future<List<DeviceEnrichment>> collect({
+    required Set<String> targetAddresses,
+    required DiscoveryCancellationToken cancellationToken,
+  }) async {
+    return const [
+      DeviceEnrichment(
+        ipAddress: '192.168.0.30',
+        displayName: 'BID-AT200',
+        sources: [DiscoverySource.reverseDns],
+      ),
+    ];
   }
 }
