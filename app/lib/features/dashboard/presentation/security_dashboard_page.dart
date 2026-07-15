@@ -22,7 +22,7 @@ import 'package:wifi_scan/features/network_profiles/infrastructure/platform_netw
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_backup_codec.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_transfer_file_service.dart';
 
-const String _buildVersion = 'v1.2.2+7';
+const String _buildVersion = 'v1.2.3+8';
 
 enum _DashboardSection { overview, networks, devices, findings }
 
@@ -901,7 +901,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                     _MessagePanel(
                       message: _message!,
                       isError: _messageIsError,
-                      onDismiss: _messageIsError ? _dismissMessage : null,
+                      onDismiss: _dismissMessage,
                     ),
                   if (_progress != null && _isScanning) ...[
                     const SizedBox(height: 8),
@@ -997,7 +997,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         _MessagePanel(
           message: _message!,
           isError: _messageIsError,
-          onDismiss: _messageIsError ? _dismissMessage : null,
+          onDismiss: _dismissMessage,
         ),
       ],
       if (_isScanning && _progress != null) ...[
@@ -3254,12 +3254,12 @@ class _MessagePanel extends StatelessWidget {
   const _MessagePanel({
     required this.message,
     required this.isError,
-    this.onDismiss,
+    required this.onDismiss,
   });
 
   final String message;
   final bool isError;
-  final VoidCallback? onDismiss;
+  final VoidCallback onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -3267,16 +3267,16 @@ class _MessagePanel extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final foreground = isError
         ? (isDark ? colorScheme.onError : colorScheme.error)
-        : colorScheme.onSecondaryContainer;
+        : Colors.white;
     return Card(
       color: isError
           ? colorScheme.error.withValues(alpha: isDark ? 0.68 : 0.16)
-          : colorScheme.secondaryContainer,
+          : Colors.black.withValues(alpha: isDark ? 0.72 : 0.76),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: isError
             ? BorderSide(color: colorScheme.error.withValues(alpha: 0.55))
-            : BorderSide.none,
+            : BorderSide(color: Colors.white.withValues(alpha: 0.18)),
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
@@ -3285,22 +3285,17 @@ class _MessagePanel extends StatelessWidget {
             Expanded(
               child: Text(message, style: TextStyle(color: foreground)),
             ),
-            if (onDismiss != null) ...[
-              const SizedBox(width: 8),
-              IconButton(
-                key: const ValueKey('message-panel-close'),
-                onPressed: onDismiss,
-                icon: const Icon(Icons.close),
-                iconSize: 20,
-                color: foreground,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints.tightFor(
-                  width: 32,
-                  height: 32,
-                ),
-                tooltip: '오류 메시지 닫기',
-              ),
-            ],
+            const SizedBox(width: 8),
+            IconButton(
+              key: const ValueKey('message-panel-close'),
+              onPressed: onDismiss,
+              icon: const Icon(Icons.close),
+              iconSize: 20,
+              color: foreground,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+              tooltip: '메시지 닫기',
+            ),
           ],
         ),
       ),

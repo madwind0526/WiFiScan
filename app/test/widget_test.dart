@@ -18,7 +18,7 @@ void main() {
     await tester.pumpWidget(const WifiScanApp());
 
     expect(find.text('WifiScan'), findsOneWidget);
-    expect(find.text('v1.2.2+7'), findsOneWidget);
+    expect(find.text('v1.2.3+8'), findsOneWidget);
     expect(find.byTooltip('설정'), findsOneWidget);
     expect(find.byTooltip('전체 네트워크 스캔'), findsOneWidget);
     expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);
@@ -40,7 +40,17 @@ void main() {
     await tester.tap(find.byTooltip('현재 네트워크 검색 시작').first);
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('검색이 완료되었습니다.'), findsOneWidget);
+    final completedMessage = find.textContaining('검색이 완료되었습니다.');
+    expect(completedMessage, findsOneWidget);
+    expect(find.byTooltip('메시지 닫기'), findsOneWidget);
+    final completedCard = tester.widget<Card>(
+      find.ancestor(of: completedMessage, matching: find.byType(Card)).first,
+    );
+    expect(completedCard.color!.a, lessThan(1));
+    expect(tester.widget<Text>(completedMessage).style?.color, Colors.white);
+    await tester.tap(find.byKey(const ValueKey('message-panel-close')));
+    await tester.pump();
+    expect(completedMessage, findsNothing);
     await tester.tap(find.byTooltip('장비'));
     await tester.pumpAndSettle();
     expect(find.text('Mesh'), findsOneWidget);
@@ -125,7 +135,7 @@ void main() {
     const errorMessage = '3개 네트워크를 확인했습니다. 1개 네트워크는 연결하지 못했습니다.';
     final messageFinder = find.text(errorMessage);
     expect(messageFinder, findsOneWidget);
-    expect(find.byTooltip('오류 메시지 닫기'), findsOneWidget);
+    expect(find.byTooltip('메시지 닫기'), findsOneWidget);
     final card = tester.widget<Card>(
       find.ancestor(of: messageFinder, matching: find.byType(Card)).first,
     );
