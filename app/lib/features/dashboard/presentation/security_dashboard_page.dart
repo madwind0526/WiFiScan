@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:wifi_scan/features/dashboard/domain/network_overview.dart';
+import 'package:wifi_scan/features/dashboard/presentation/obsidian_mesh_graph.dart';
 import 'package:wifi_scan/features/discovery/application/network_discovery_service.dart';
 import 'package:wifi_scan/features/discovery/domain/discovery_result.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/platform_network_discovery_service.dart';
@@ -21,7 +22,7 @@ import 'package:wifi_scan/features/network_profiles/infrastructure/platform_netw
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_backup_codec.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_transfer_file_service.dart';
 
-const String _buildVersion = 'v1.1.2+4';
+const String _buildVersion = 'v1.2.0+5';
 
 enum _DashboardSection { overview, networks, devices, findings }
 
@@ -1117,7 +1118,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   // known, so the mesh falls back to a single hub. Note: two routers joined by
   // a wired LAN in AP/bridge mode share one gateway and therefore appear as a
   // single cluster; only a double-NAT setup (separate gateways) splits them.
-  List<_MeshCluster>? _buildMeshClusters(List<NetworkDevice> devices) {
+  List<MeshGraphCluster>? _buildMeshClusters(List<NetworkDevice> devices) {
     final byId = {for (final device in devices) device.id: device};
     final gatewayToIds = <String, Set<String>>{};
     for (final record in _networkScans.values) {
@@ -1131,7 +1132,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     if (gatewayToIds.length < 2) return null;
 
     final assigned = <String>{};
-    final clusters = <_MeshCluster>[];
+    final clusters = <MeshGraphCluster>[];
     for (final entry in gatewayToIds.entries) {
       NetworkDevice? hub;
       final members = <NetworkDevice>[];
@@ -1143,7 +1144,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       }
       if (members.isEmpty) continue;
       clusters.add(
-        _MeshCluster(
+        MeshGraphCluster(
           label: hub?.displayName ?? '공유기 · ${entry.key}',
           hub: hub,
           members: members,
@@ -1155,7 +1156,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         .where((device) => !assigned.contains(device.id))
         .toList(growable: false);
     if (leftovers.isNotEmpty) {
-      clusters.add(_MeshCluster(label: '기타 관측', members: leftovers));
+      clusters.add(MeshGraphCluster(label: '기타 관측', members: leftovers));
     }
     return clusters.length < 2 ? null : clusters;
   }
@@ -2760,269 +2761,15 @@ class _DeviceCardGrid extends StatelessWidget {
   }
 }
 
-class _MeshCluster {
-  const _MeshCluster({required this.label, required this.members, this.hub});
-
-  final String label;
-  final NetworkDevice? hub;
-  final List<NetworkDevice> members;
-}
-
-class _MeshEdge {
-  const _MeshEdge(this.from, this.to);
-
-  final Offset from;
-  final Offset to;
-}
-
-class _MeshLabel {
-  const _MeshLabel(this.text, this.position);
-
-  final String text;
-  final Offset position;
-}
-
-class _MeshNetworkView extends StatelessWidget {
+class _MeshNetworkView extends ObsidianMeshGraph {
   const _MeshNetworkView({
-    required this.devices,
-    required this.newDeviceIds,
-    required this.onDeviceTap,
-    this.gateway,
-    this.clusters,
-    this.framed = true,
+    required super.devices,
+    required super.newDeviceIds,
+    required super.onDeviceTap,
+    super.gateway,
+    super.clusters,
+    super.framed,
   });
-
-  final List<NetworkDevice> devices;
-  final Set<String> newDeviceIds;
-  final ValueChanged<NetworkDevice> onDeviceTap;
-  final String? gateway;
-  final List<_MeshCluster>? clusters;
-  final bool framed;
-
-  @override
-  Widget build(BuildContext context) {
-    if (!framed) return _content(context);
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(height: 440, child: _content(context)),
-    );
-  }
-
-  NetworkDevice? _hubDevice() {
-    for (final device in devices) {
-      if (gateway != null && device.ipAddresses.contains(gateway)) {
-        return device;
-      }
-    }
-    for (final device in devices) {
-      if (device.category == DeviceCategory.router) return device;
-    }
-    for (final device in devices) {
-      if (device.sources.contains(DiscoverySource.localInterface)) {
-        return device;
-      }
-    }
-    return null;
-  }
-
-  List<_MeshCluster> _activeClusters() {
-    final source = clusters;
-    if (source != null && source.length > 1) return source;
-    return [_MeshCluster(label: '', hub: _hubDevice(), members: devices)];
-  }
-
-  Widget _content(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final viewHeight = constraints.maxHeight.isFinite
-            ? constraints.maxHeight
-            : 440.0;
-        final width = constraints.maxWidth;
-        final center = Offset(width / 2, viewHeight / 2);
-        final active = _activeClusters();
-        final clusterCount = active.length;
-        final minSide = math.min(width, viewHeight);
-        final clusterRadius = clusterCount == 1 ? 0.0 : minSide * 0.3;
-        final memberSpread = minSide * (clusterCount == 1 ? 0.32 : 0.16);
-
-        final positions = <String, Offset>{};
-        final edges = <_MeshEdge>[];
-        final hubCenters = <Offset>[];
-        final labels = <_MeshLabel>[];
-
-        for (var ci = 0; ci < clusterCount; ci++) {
-          final cluster = active[ci];
-          final clusterCenter = clusterCount == 1
-              ? center
-              : Offset(
-                  center.dx +
-                      math.cos(2 * math.pi * ci / clusterCount - math.pi / 2) *
-                          clusterRadius,
-                  center.dy +
-                      math.sin(2 * math.pi * ci / clusterCount - math.pi / 2) *
-                          clusterRadius,
-                );
-          final hub = cluster.hub;
-          if (hub != null) {
-            positions[hub.id] = clusterCenter;
-            hubCenters.add(clusterCenter);
-          }
-          if (cluster.label.isNotEmpty) {
-            labels.add(_MeshLabel(cluster.label, clusterCenter));
-          }
-          final members = cluster.members
-              .where((device) => device.id != hub?.id)
-              .toList(growable: false);
-          for (var index = 0; index < members.length; index++) {
-            final hash = members[index].id.codeUnits.fold<int>(
-              0,
-              (sum, item) => sum + item,
-            );
-            final angle = (index * 2.399963) + (hash % 31) / 100;
-            final distance = memberSpread * (0.55 + (hash % 23) / 100);
-            final position = Offset(
-              clusterCenter.dx + math.cos(angle) * distance,
-              clusterCenter.dy + math.sin(angle) * distance,
-            );
-            positions[members[index].id] = position;
-            edges.add(_MeshEdge(clusterCenter, position));
-          }
-        }
-
-        return Stack(
-          children: [
-            Positioned.fill(
-              child: InteractiveViewer(
-                boundaryMargin: const EdgeInsets.all(100),
-                minScale: 0.6,
-                maxScale: 2.5,
-                child: SizedBox(
-                  width: width,
-                  height: viewHeight,
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: CustomPaint(
-                          painter: _MeshNetworkPainter(
-                            edges: edges,
-                            hubs: hubCenters,
-                            scheme: Theme.of(context).colorScheme,
-                            showRings: clusterCount == 1,
-                          ),
-                        ),
-                      ),
-                      for (final label in labels)
-                        Positioned(
-                          left: label.position.dx - 64,
-                          top: label.position.dy - 62,
-                          width: 128,
-                          child: Text(
-                            label.text,
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                        ),
-                      for (final device in devices)
-                        if (positions[device.id] != null)
-                          Positioned(
-                            left: positions[device.id]!.dx - 34,
-                            top: positions[device.id]!.dy - 34,
-                            child: _TopologyNode(
-                              device: device,
-                              isNew: newDeviceIds.contains(device.id),
-                              onTap: () => onDeviceTap(device),
-                            ),
-                          ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              left: 16,
-              top: 14,
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.hub_outlined,
-                    size: 18,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    clusterCount > 1 ? '메시 보기 · 공유기 $clusterCount대' : '메시 보기',
-                  ),
-                ],
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _MeshNetworkPainter extends CustomPainter {
-  const _MeshNetworkPainter({
-    required this.edges,
-    required this.hubs,
-    required this.scheme,
-    this.showRings = false,
-  });
-
-  final List<_MeshEdge> edges;
-  final List<Offset> hubs;
-  final ColorScheme scheme;
-  final bool showRings;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (showRings && hubs.isNotEmpty) {
-      final ringPaint = Paint()
-        ..color = scheme.outlineVariant.withValues(alpha: 0.42)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1;
-      for (final radius in [70.0, 140.0, 210.0]) {
-        canvas.drawCircle(
-          hubs.first,
-          math.min(radius, size.width * 0.46),
-          ringPaint,
-        );
-      }
-    }
-    if (hubs.length > 1) {
-      final backbonePaint = Paint()
-        ..color = scheme.secondary.withValues(alpha: 0.5)
-        ..strokeWidth = 2.4
-        ..strokeCap = StrokeCap.round;
-      for (var index = 0; index + 1 < hubs.length; index++) {
-        canvas.drawLine(hubs[index], hubs[index + 1], backbonePaint);
-      }
-    }
-    final edgePaint = Paint()
-      ..color = scheme.primary.withValues(alpha: 0.26)
-      ..strokeWidth = 1.3;
-    for (final edge in edges) {
-      canvas.drawLine(edge.from, edge.to, edgePaint);
-    }
-    final centerPaint = Paint()
-      ..color = scheme.primary.withValues(alpha: 0.12)
-      ..style = PaintingStyle.fill;
-    for (final hub in hubs) {
-      canvas.drawCircle(hub, 46, centerPaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _MeshNetworkPainter oldDelegate) => true;
 }
 
 class _DetailRow extends StatelessWidget {

@@ -47,3 +47,7 @@ ICMP/neighbor 결과만으로 부족한 장비 정보를 역방향 DNS, mDNS/DNS
 ## Suppression Tombstone for Auto-Discovered Profiles
 
 외부 소스에서 자동 병합하는 항목을 사용자가 삭제할 수 있어야 하면 단순 목록 삭제만으로는 부족하다. 삭제된 외부 키를 로컬 suppression tombstone으로 저장하고 자동 병합에서 제외한다. 사용자가 같은 키를 직접 추가하거나 가져올 때만 tombstone을 해제한다.
+
+## Deterministic Force-Directed Device Graph
+
+네트워크 메시는 노드 ID 기반 초기 위치와 고정 반복 횟수의 반발력·스프링·클러스터 중력을 결합한다. 결정론적 배치를 사용하면 데이터가 바뀌지 않은 재빌드·호버·선택에서 노드가 흔들리지 않는다. 그래프는 `InteractiveViewer` 안의 하나의 캔버스로 배치해 간선·노드·라벨이 같이 줌과 이동을 따르게 한다. 유형별 입체 구 색상, 공유기 크기, 세로 범례은 시각 코딩을 담당하고 호버 시 이웃 노드와 간선만 강조한다.

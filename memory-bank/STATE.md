@@ -2,10 +2,10 @@
 
 ## Current Wave
 
-- **Wave:** 13
+- **Wave:** 14
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-15 Wave 13 삭제 프로필 suppression, 버전 1.1.2+4, analyze/33 tests/Windows 빌드 검증 완료
+- **Last Checkpoint:** 2026-07-15 Wave 14 입체 구 메시 그래프, analyze/35 tests/Windows v1.2.0+5 실행 검증 완료
 
 ## Wave History
 
@@ -25,6 +25,7 @@
 | 11 | Windows Wi-Fi 전용 탐색과 게이트웨이 오선택 수정 | Done |
 | 12 | 동일 서브넷 탐색 패킷의 Ethernet 우회 수정 | Done |
 | 13 | 삭제한 Windows 자동 탐색 프로필의 재등록 방지 | Done |
+| 14 | 장비 유형별 입체 구와 Obsidian 스타일 힘 기반 메시 그래프 | Done |
 
 ## Session Notes
 
