@@ -18,7 +18,7 @@ void main() {
     await tester.pumpWidget(const WifiScanApp());
 
     expect(find.text('WifiScan'), findsOneWidget);
-    expect(find.text('v1.2.3+8'), findsOneWidget);
+    expect(find.text('v1.3.0+9'), findsOneWidget);
     expect(find.byTooltip('설정'), findsOneWidget);
     expect(find.byTooltip('전체 네트워크 스캔'), findsOneWidget);
     expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);
@@ -40,7 +40,7 @@ void main() {
     await tester.tap(find.byTooltip('현재 네트워크 검색 시작').first);
     await tester.pumpAndSettle();
 
-    final completedMessage = find.textContaining('검색이 완료되었습니다.');
+    final completedMessage = find.textContaining('검색 완료');
     expect(completedMessage, findsOneWidget);
     expect(find.byTooltip('메시지 닫기'), findsOneWidget);
     final completedCard = tester.widget<Card>(
@@ -48,6 +48,7 @@ void main() {
     );
     expect(completedCard.color!.a, lessThan(1));
     expect(tester.widget<Text>(completedMessage).style?.color, Colors.white);
+    expect(tester.widget<Text>(completedMessage).textAlign, TextAlign.center);
     await tester.tap(find.byKey(const ValueKey('message-panel-close')));
     await tester.pump();
     expect(completedMessage, findsNothing);
@@ -95,6 +96,44 @@ void main() {
     );
   });
 
+  testWidgets('uses a concise banner for one newly discovered device', (
+    tester,
+  ) async {
+    final previousDevice = NetworkDevice(
+      id: 'local:192.168.0.30',
+      displayName: '내 PC',
+      category: DeviceCategory.computer,
+      ownershipStatus: OwnershipStatus.confirmed,
+      ipAddresses: const ['192.168.0.30'],
+      sources: const [DiscoverySource.localInterface],
+      firstSeenAt: DateTime(2026, 7, 10),
+      lastSeenAt: DateTime(2026, 7, 10),
+      identityConfidence: 1,
+    );
+    final store = _MemorySnapshotStore([
+      InventorySnapshot(
+        scannedAt: DateTime(2026, 7, 10),
+        networkKey: '192.168.0.0/24',
+        context: _testNetworkContext,
+        devices: [previousDevice],
+        limitations: const [],
+      ),
+    ]);
+    await tester.pumpWidget(
+      WifiScanApp(
+        discoveryService: const _FakeDiscoveryService(),
+        inventoryRepository: InventoryRepository(store: store),
+        connectionService: const _FakeConnectionService(),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('현재 네트워크 검색 시작').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('검색 완료 · 신규 장비 1개 발견'), findsOneWidget);
+    expect(find.byTooltip('메시지 닫기'), findsOneWidget);
+  });
+
   testWidgets('allows the user to stop an active scan', (tester) async {
     await tester.pumpWidget(
       const WifiScanApp(
@@ -109,7 +148,7 @@ void main() {
 
     await tester.tap(find.byTooltip('검색 중지 요청').first);
     await tester.pump(const Duration(milliseconds: 20));
-    expect(find.text('검색을 중지했습니다.'), findsOneWidget);
+    expect(find.text('검색 중지'), findsOneWidget);
     expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);
   });
 
@@ -132,7 +171,7 @@ void main() {
     await tester.tap(find.byTooltip('현재 네트워크 검색 시작').first);
     await tester.pumpAndSettle();
 
-    const errorMessage = '3개 네트워크를 확인했습니다. 1개 네트워크는 연결하지 못했습니다.';
+    const errorMessage = '네트워크 검색 불가';
     final messageFinder = find.text(errorMessage);
     expect(messageFinder, findsOneWidget);
     expect(find.byTooltip('메시지 닫기'), findsOneWidget);
@@ -140,6 +179,7 @@ void main() {
       find.ancestor(of: messageFinder, matching: find.byType(Card)).first,
     );
     expect(card.color!.a, lessThan(1));
+    expect(tester.widget<Text>(messageFinder).textAlign, TextAlign.center);
     expect(tester.takeException(), isNull);
     await tester.tap(find.byKey(const ValueKey('message-panel-close')));
     await tester.pump();
@@ -413,16 +453,7 @@ class _FakeDiscoveryService implements NetworkDiscoveryService {
       ),
     );
     return DiscoveryResult(
-      context: const NetworkContext(
-        interfaceName: 'Wi-Fi',
-        interfaceIndex: 1,
-        ipv4Address: '192.168.0.30',
-        prefixLength: 24,
-        gateway: '192.168.0.1',
-        scannedNetwork: '192.168.0.0',
-        scannedPrefixLength: 24,
-        coverageLimited: false,
-      ),
+      context: _testNetworkContext,
       devices: [
         NetworkDevice(
           id: 'local:192.168.0.30',
@@ -523,6 +554,10 @@ class _FakeConnectionService implements NetworkConnectionService {
 }
 
 class _MemorySnapshotStore implements InventorySnapshotStore {
+  _MemorySnapshotStore([Iterable<InventorySnapshot> initial = const []]) {
+    snapshots.addAll(initial);
+  }
+
   final List<InventorySnapshot> snapshots = [];
 
   @override
@@ -535,6 +570,17 @@ class _MemorySnapshotStore implements InventorySnapshotStore {
       ..addAll(value);
   }
 }
+
+const _testNetworkContext = NetworkContext(
+  interfaceName: 'Wi-Fi',
+  interfaceIndex: 1,
+  ipv4Address: '192.168.0.30',
+  prefixLength: 24,
+  gateway: '192.168.0.1',
+  scannedNetwork: '192.168.0.0',
+  scannedPrefixLength: 24,
+  coverageLimited: false,
+);
 
 class _MemoryProfileRepository extends NetworkProfileRepository {
   _MemoryProfileRepository([Iterable<NetworkProfile> initial = const []]) {

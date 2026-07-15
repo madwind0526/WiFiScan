@@ -22,7 +22,7 @@ import 'package:wifi_scan/features/network_profiles/infrastructure/platform_netw
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_backup_codec.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_transfer_file_service.dart';
 
-const String _buildVersion = 'v1.2.3+8';
+const String _buildVersion = 'v1.3.0+9';
 
 enum _DashboardSection { overview, networks, devices, findings }
 
@@ -228,28 +228,28 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         _hasCompletedScan = true;
         _securityAnalysisCompleted = inventoryUpdate != null;
         _message = storageWarning
-            ? '검색은 완료되었지만 장비 기록을 저장하지 못했습니다.'
+            ? '검색 완료 · 장비 기록 저장 실패'
             : inventoryUpdate?.isBaseline == true
-            ? '검색이 완료되었습니다. 이번 결과를 기준선으로 저장했습니다.'
-            : '검색이 완료되었습니다. 신규 장비 ${newDevices.length}개를 확인했습니다.';
+            ? '검색 완료 · 기준선 저장'
+            : '검색 완료 · 신규 장비 ${newDevices.length}개 발견';
         _messageIsError = storageWarning;
       });
     } on DiscoveryCancelledException {
       if (!mounted) return;
       setState(() {
-        _message = '검색을 중지했습니다.';
+        _message = '검색 중지';
         _messageIsError = false;
       });
-    } on DiscoveryUnavailableException catch (error) {
+    } on DiscoveryUnavailableException {
       if (!mounted) return;
       setState(() {
-        _message = error.message;
+        _message = '네트워크 검색 불가';
         _messageIsError = true;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _message = '네트워크 정보를 읽지 못했습니다. 잠시 후 다시 시도하세요.';
+        _message = '네트워크 정보 확인 실패 · 잠시 후 재시도';
         _messageIsError = true;
       });
     } finally {
@@ -282,7 +282,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       _isScanningAllNetworks = true;
       _cancellationToken = token;
       _progress = null;
-      _message = '등록된 네트워크를 준비하는 중입니다.';
+      _message = '네트워크 준비 중';
       _messageIsError = false;
     });
 
@@ -290,7 +290,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       for (final profile in _networkProfiles) {
         if (token.isCancelled) throw const DiscoveryCancelledException();
         setState(() {
-          _message = '${profile.displayName}에 연결하는 중입니다.';
+          _message = '${profile.displayName} 연결 중';
         });
         try {
           await _connectionService.connect(profile);
@@ -356,14 +356,14 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         _hasCompletedScan = completedNetworks > 0;
         _securityAnalysisCompleted = completedNetworks > 0;
         _message = failures == 0
-            ? '$completedNetworks개 네트워크 검색을 완료했습니다.'
-            : '$completedNetworks개 네트워크를 확인했습니다. $failures개 네트워크는 연결하지 못했습니다.';
+            ? '$completedNetworks개 네트워크 검색 완료'
+            : '$completedNetworks개 네트워크 확인 · $failures개 연결 실패';
         _messageIsError = failures > 0;
       });
     } on DiscoveryCancelledException {
       if (mounted) {
         setState(() {
-          _message = '전체 네트워크 검색을 중지했습니다.';
+          _message = '전체 네트워크 검색 중지';
           _messageIsError = false;
         });
       }
@@ -373,7 +373,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       } catch (_) {
         if (mounted) {
           setState(() {
-            _message = '검색은 끝났지만 원래 Wi-Fi로 자동 복원하지 못했습니다.';
+            _message = '검색 완료 · 기존 Wi-Fi 복원 실패';
             _messageIsError = true;
           });
         }
@@ -407,7 +407,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       _isScanning = true;
       _cancellationToken = token;
       _progress = null;
-      _message = '${profile.displayName}에 연결하는 중입니다.';
+      _message = '${profile.displayName} 연결 중';
       _messageIsError = false;
     });
 
@@ -451,17 +451,17 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         _remediationPlans = plans;
         _hasCompletedScan = true;
         _securityAnalysisCompleted = true;
-        _message = '${profile.displayName} 검색을 완료했습니다.';
+        _message = '${profile.displayName} 검색 완료';
         _messageIsError = false;
       });
     } on DiscoveryCancelledException {
       if (mounted) {
         setState(() {
-          _message = '검색을 중지했습니다.';
+          _message = '검색 중지';
           _messageIsError = false;
         });
       }
-    } on NetworkConnectionException catch (error) {
+    } on NetworkConnectionException {
       if (mounted) {
         setState(() {
           _networkScans[profile.id] = _NetworkScanRecord(
@@ -469,21 +469,21 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
             scannedAt: DateTime.now(),
             failed: true,
           );
-          _message = error.message;
+          _message = '${profile.displayName} 연결 실패';
           _messageIsError = true;
         });
       }
-    } on DiscoveryUnavailableException catch (error) {
+    } on DiscoveryUnavailableException {
       if (mounted) {
         setState(() {
-          _message = error.message;
+          _message = '${profile.displayName} 검색 불가';
           _messageIsError = true;
         });
       }
     } catch (_) {
       if (mounted) {
         setState(() {
-          _message = '네트워크 정보를 읽지 못했습니다. 잠시 후 다시 시도하세요.';
+          _message = '네트워크 정보 확인 실패 · 잠시 후 재시도';
           _messageIsError = true;
         });
       }
@@ -494,7 +494,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         } catch (_) {
           if (mounted) {
             setState(() {
-              _message = '검색은 끝났지만 원래 Wi-Fi로 자동 복원하지 못했습니다.';
+              _message = '검색 완료 · 기존 Wi-Fi 복원 실패';
               _messageIsError = true;
             });
           }
@@ -564,7 +564,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     if (_isScanning) return;
     setState(() {
       _isScanning = true;
-      _message = '${profile.displayName}에 연결하는 중입니다.';
+      _message = '${profile.displayName} 연결 중';
       _messageIsError = false;
     });
     try {
@@ -578,20 +578,20 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       if (!mounted) return;
       setState(() {
         _currentSsid = ssid ?? profile.ssid;
-        _message = '${profile.displayName}에 연결했습니다.';
+        _message = '${profile.displayName} 연결 완료';
         _messageIsError = false;
       });
-    } on NetworkConnectionException catch (error) {
+    } on NetworkConnectionException {
       if (mounted) {
         setState(() {
-          _message = error.message;
+          _message = '${profile.displayName} 연결 실패';
           _messageIsError = true;
         });
       }
     } catch (_) {
       if (mounted) {
         setState(() {
-          _message = '${profile.displayName}에 연결하지 못했습니다.';
+          _message = '${profile.displayName} 연결 실패';
           _messageIsError = true;
         });
       }
@@ -795,7 +795,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   void _cancelScan() {
     _cancellationToken?.cancel();
     setState(() {
-      _message = '검색 중지를 요청했습니다.';
+      _message = '검색 중지 요청';
       _messageIsError = false;
     });
   }
@@ -1374,7 +1374,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   Future<void> _exportProfiles() async {
     if (_networkProfiles.isEmpty) {
       setState(() {
-        _message = '내보낼 네트워크 프로필이 없습니다.';
+        _message = '내보낼 네트워크 프로필 없음';
         _messageIsError = true;
       });
       return;
@@ -1390,13 +1390,13 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       if (!saved) return;
       if (!mounted) return;
       setState(() {
-        _message = '네트워크 프로필 ${_networkProfiles.length}개를 내보냈습니다.';
+        _message = '네트워크 프로필 ${_networkProfiles.length}개 내보내기 완료';
         _messageIsError = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _message = '네트워크 프로필을 내보내지 못했습니다.';
+        _message = '네트워크 프로필 내보내기 실패';
         _messageIsError = true;
       });
     }
@@ -1426,19 +1426,19 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       if (!mounted) return;
       setState(() {
         _networkProfiles = profiles;
-        _message = '네트워크 프로필 ${imported.length}개를 가져왔습니다.';
+        _message = '네트워크 프로필 ${imported.length}개 가져오기 완료';
         _messageIsError = false;
       });
     } on ProfileBackupException {
       if (!mounted) return;
       setState(() {
-        _message = '암호가 올바르지 않거나 파일이 손상되었습니다.';
+        _message = '암호 오류 또는 파일 손상';
         _messageIsError = true;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _message = '네트워크 프로필을 가져오지 못했습니다.';
+        _message = '네트워크 프로필 가져오기 실패';
         _messageIsError = true;
       });
     }
@@ -3279,22 +3279,37 @@ class _MessagePanel extends StatelessWidget {
             : BorderSide(color: Colors.white.withValues(alpha: 0.18)),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-        child: Row(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        child: Stack(
+          alignment: Alignment.center,
           children: [
-            Expanded(
-              child: Text(message, style: TextStyle(color: foreground)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
+              child: SizedBox(
+                width: double.infinity,
+                child: Text(
+                  message,
+                  key: const ValueKey('message-panel-text'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: foreground),
+                ),
+              ),
             ),
-            const SizedBox(width: 8),
-            IconButton(
-              key: const ValueKey('message-panel-close'),
-              onPressed: onDismiss,
-              icon: const Icon(Icons.close),
-              iconSize: 20,
-              color: foreground,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-              tooltip: '메시지 닫기',
+            Align(
+              alignment: Alignment.centerRight,
+              child: IconButton(
+                key: const ValueKey('message-panel-close'),
+                onPressed: onDismiss,
+                icon: const Icon(Icons.close),
+                iconSize: 20,
+                color: foreground,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 32,
+                  height: 32,
+                ),
+                tooltip: '메시지 닫기',
+              ),
             ),
           ],
         ),

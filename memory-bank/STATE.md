@@ -2,10 +2,10 @@
 
 ## Current Wave
 
-- **Wave:** 17
+- **Wave:** 18
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-16 Wave 17 모든 상태 배너 반투명·고대비·닫기 통일, analyze/40 tests/Windows v1.2.3+8 실행 검증 완료
+- **Last Checkpoint:** 2026-07-16 Wave 18 스캔 앱 아이콘과 중앙 정렬 명사형 배너, analyze/41 tests/Windows·Android v1.3.0+9 빌드 및 Android 실기기 설치 검증 완료
 
 ## Wave History
 
@@ -29,6 +29,7 @@
 | 15 | 단색 다중 GW 메시, 닫을 수 있는 오류 배너, DNS-SD/NetBIOS 식별 보강 | Done |
 | 16 | 현재 표시 장비·경고와 홈 요약 숫자의 데이터 범위 일치 | Done |
 | 17 | 모든 동적 상태 배너의 반투명 배경·고대비 글씨·닫기 동작 통일 | Done |
+| 18 | 중앙 스캔 앱 아이콘과 중앙 정렬 명사형 상태 배너 | Done |
 
 ## Session Notes
 
