@@ -18,7 +18,7 @@ void main() {
     await tester.pumpWidget(const WifiScanApp());
 
     expect(find.text('WifiScan'), findsOneWidget);
-    expect(find.text('v1.2.1+6'), findsOneWidget);
+    expect(find.text('v1.2.2+7'), findsOneWidget);
     expect(find.byTooltip('설정'), findsOneWidget);
     expect(find.byTooltip('전체 네트워크 스캔'), findsOneWidget);
     expect(find.byTooltip('현재 네트워크 검색 시작'), findsOneWidget);
@@ -60,6 +60,29 @@ void main() {
     expect(find.text('A6004NS-M'), findsOneWidget);
     expect(find.textContaining('HTTP 80/tcp'), findsOneWidget);
     await tester.tap(find.byTooltip('닫기'));
+    await tester.pumpAndSettle();
+    final searchField = find.byWidgetPredicate(
+      (widget) => widget is TextField && widget.decoration?.hintText == '장비 검색',
+    );
+    await tester.enterText(searchField, '내 PC');
+    await tester.pumpAndSettle();
+    expect(find.text('장비 1개'), findsOneWidget);
+    await tester.tap(find.byTooltip('홈'));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('visible-device-count')),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('visible-warning-count')),
+        matching: find.text('0'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('allows the user to stop an active scan', (tester) async {

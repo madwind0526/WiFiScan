@@ -22,7 +22,7 @@ import 'package:wifi_scan/features/network_profiles/infrastructure/platform_netw
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_backup_codec.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_transfer_file_service.dart';
 
-const String _buildVersion = 'v1.2.1+6';
+const String _buildVersion = 'v1.2.2+7';
 
 enum _DashboardSection { overview, networks, devices, findings }
 
@@ -868,6 +868,8 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         ? '스캔 후 인터페이스, 게이트웨이, 검색 범위가 표시됩니다.'
         : '${network.interfaceName} · ${network.ipv4Address} · '
               'GW ${network.gateway} · ${network.scannedSubnet}';
+    final visibleDevices = _filteredDevices;
+    final visibleWarningCount = _warningCountFor(visibleDevices);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       child: Container(
@@ -881,11 +883,11 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
             if (_overview.devices.isNotEmpty)
               Positioned.fill(
                 child: _MeshNetworkView(
-                  devices: _filteredDevices,
+                  devices: visibleDevices,
                   newDeviceIds: _newDeviceIds,
                   onDeviceTap: _showDeviceDetails,
                   gateway: network?.gateway,
-                  clusters: _buildMeshClusters(_filteredDevices),
+                  clusters: _buildMeshClusters(visibleDevices),
                   framed: false,
                 ),
               ),
@@ -916,8 +918,8 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
               left: 16,
               bottom: 36,
               child: _MiniSummary(
-                deviceCount: _overview.devices.length,
-                warningCount: _overview.findings.length,
+                deviceCount: visibleDevices.length,
+                warningCount: visibleWarningCount,
                 networkCount: _networkProfiles.length,
                 scannedNetworkCount: _networkScans.values
                     .where((record) => !record.failed)
@@ -1126,6 +1128,20 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
           return fields.any((field) => field.toLowerCase().contains(query));
         })
         .toList(growable: false);
+  }
+
+  int _warningCountFor(List<NetworkDevice> visibleDevices) {
+    final visibleIds = visibleDevices.map((device) => device.id).toSet();
+    final isFiltered =
+        _networkFilterId != null ||
+        _searchQuery.isNotEmpty ||
+        visibleIds.length != _overview.devices.length;
+    return _overview.findings.where((finding) {
+      if (finding.severity == FindingSeverity.information) return false;
+      final deviceId = finding.deviceId;
+      if (deviceId != null) return visibleIds.contains(deviceId);
+      return !isFiltered;
+    }).length;
   }
 
   // Groups devices into per-router clusters using the gateway recorded for each
@@ -2522,6 +2538,7 @@ class _MiniSummary extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _MiniSummaryRow(
+          key: const ValueKey('visible-device-count'),
           icon: Icons.devices_other,
           value: '$deviceCount',
           tooltip: '연결 장비',
@@ -2529,6 +2546,7 @@ class _MiniSummary extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         _MiniSummaryRow(
+          key: const ValueKey('visible-warning-count'),
           icon: warningCount == 0
               ? Icons.verified_user_outlined
               : Icons.warning_amber,
@@ -2551,6 +2569,7 @@ class _MiniSummary extends StatelessWidget {
 
 class _MiniSummaryRow extends StatelessWidget {
   const _MiniSummaryRow({
+    super.key,
     required this.icon,
     required this.value,
     required this.tooltip,
