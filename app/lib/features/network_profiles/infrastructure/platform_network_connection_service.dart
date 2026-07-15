@@ -21,6 +21,9 @@ class _UnsupportedNetworkConnectionService implements NetworkConnectionService {
   Future<String?> currentSsid() async => null;
 
   @override
+  Future<WifiBand> currentBand() async => WifiBand.unknown;
+
+  @override
   Future<void> connect(NetworkProfile profile) async {
     throw const NetworkConnectionException(
       '이 기기에서는 앱이 Wi-Fi를 자동 전환할 수 없습니다. 시스템 Wi-Fi 화면에서 연결한 뒤 다시 검색하세요.',

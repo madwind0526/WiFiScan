@@ -385,6 +385,9 @@ class _FakeConnectionService implements NetworkConnectionService {
   Future<String?> currentSsid() async => null;
 
   @override
+  Future<WifiBand> currentBand() async => WifiBand.unknown;
+
+  @override
   Future<void> connect(NetworkProfile profile) async {}
 
   @override

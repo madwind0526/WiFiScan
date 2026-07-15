@@ -31,11 +31,13 @@ class _NetworkScanRecord {
   const _NetworkScanRecord({
     required this.deviceIds,
     required this.scannedAt,
+    this.gateway,
     this.failed = false,
   });
 
   final Set<String> deviceIds;
   final DateTime scannedAt;
+  final String? gateway;
   final bool failed;
 }
 
@@ -91,6 +93,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   List<NetworkProfile> _networkProfiles = const [];
   bool _isScanningAllNetworks = false;
   final Map<String, _NetworkScanRecord> _networkScans = {};
+  final Map<String, WifiBand> _profileBands = {};
   String? _networkFilterId;
   String? _currentSsid;
 
@@ -168,8 +171,10 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       );
       if (!mounted) return;
       String? scannedSsid;
+      WifiBand scannedBand = WifiBand.unknown;
       try {
         scannedSsid = await _connectionService.currentSsid();
+        scannedBand = await _connectionService.currentBand();
       } catch (_) {
         // Tagging the scan with its network is best-effort.
       }
@@ -202,7 +207,11 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
           _networkScans[matchedProfiles.first.id] = _NetworkScanRecord(
             deviceIds: result.devices.map((device) => device.id).toSet(),
             scannedAt: DateTime.now(),
+            gateway: result.context.gateway,
           );
+          if (scannedBand != WifiBand.unknown) {
+            _profileBands[matchedProfiles.first.id] = scannedBand;
+          }
         }
         _overview = NetworkOverview(
           devices: devices,
@@ -290,6 +299,13 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
             },
           );
           lastResult = result;
+          WifiBand band = WifiBand.unknown;
+          try {
+            band = await _connectionService.currentBand();
+          } catch (_) {
+            // Band tagging is best-effort.
+          }
+          if (band != WifiBand.unknown) _profileBands[profile.id] = band;
           final update = await _inventoryRepository.record(result);
           devicesById.addAll({
             for (final device in result.devices) device.id: device,
@@ -304,6 +320,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
           _networkScans[profile.id] = _NetworkScanRecord(
             deviceIds: result.devices.map((device) => device.id).toSet(),
             scannedAt: DateTime.now(),
+            gateway: result.context.gateway,
           );
         } on NetworkConnectionException {
           failures += 1;
@@ -401,6 +418,12 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         },
       );
       if (!mounted) return;
+      WifiBand band = WifiBand.unknown;
+      try {
+        band = await _connectionService.currentBand();
+      } catch (_) {
+        // Band tagging is best-effort.
+      }
       final update = await _inventoryRepository.record(result);
       final analyzed = _securityRiskAnalyzer.analyze(
         snapshot: update.snapshot,
@@ -408,9 +431,11 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       );
       final plans = const ManualRemediationPlanner().build(analyzed.findings);
       setState(() {
+        if (band != WifiBand.unknown) _profileBands[profile.id] = band;
         _networkScans[profile.id] = _NetworkScanRecord(
           deviceIds: result.devices.map((device) => device.id).toSet(),
           scannedAt: DateTime.now(),
+          gateway: result.context.gateway,
         );
         _overview = NetworkOverview(
           devices: update.snapshot.devices,
@@ -478,6 +503,97 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
           _cancellationToken = null;
         });
       }
+    }
+  }
+
+  Future<void> _showProfileSwitcher() async {
+    if (_isScanning) return;
+    if (_networkProfiles.isEmpty) {
+      await _showNetworkProfiles();
+      return;
+    }
+    final selected = await showModalBottomSheet<NetworkProfile>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        final scheme = Theme.of(sheetContext).colorScheme;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+                child: Text(
+                  '네트워크 전환',
+                  style: Theme.of(sheetContext).textTheme.titleMedium,
+                ),
+              ),
+              for (final profile in _networkProfiles)
+                ListTile(
+                  leading: Icon(
+                    _currentSsid == profile.ssid ? Icons.wifi : Icons.wifi_find,
+                    color: _currentSsid == profile.ssid
+                        ? scheme.primary
+                        : scheme.onSurfaceVariant,
+                  ),
+                  title: Text(profile.displayName),
+                  trailing: _currentSsid == profile.ssid
+                      ? Icon(Icons.check, color: scheme.primary)
+                      : null,
+                  onTap: () => Navigator.of(sheetContext).pop(profile),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+    if (selected == null) return;
+    if (selected.ssid == _currentSsid) return;
+    await _connectToProfile(selected);
+  }
+
+  Future<void> _connectToProfile(NetworkProfile profile) async {
+    if (_isScanning) return;
+    setState(() {
+      _isScanning = true;
+      _message = '${profile.displayName}에 연결하는 중입니다.';
+      _messageIsError = false;
+    });
+    try {
+      await _connectionService.connect(profile);
+      String? ssid;
+      try {
+        ssid = await _connectionService.currentSsid();
+      } catch (_) {
+        // Reading back the SSID is best-effort.
+      }
+      if (!mounted) return;
+      setState(() {
+        _currentSsid = ssid ?? profile.ssid;
+        _message = '${profile.displayName}에 연결했습니다.';
+        _messageIsError = false;
+      });
+    } on NetworkConnectionException catch (error) {
+      if (mounted) {
+        setState(() {
+          _message = error.message;
+          _messageIsError = true;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _message = '${profile.displayName}에 연결하지 못했습니다.';
+          _messageIsError = true;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isScanning = false);
     }
   }
 
@@ -702,6 +818,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                       : _scanAllNetworks,
                   onNetworks: _showNetworkProfiles,
                   onSettings: _showSettingsSheet,
+                  onTapNetwork: _isScanning ? null : _showProfileSwitcher,
                 ),
                 Expanded(
                   child: _section == _DashboardSection.overview
@@ -755,6 +872,8 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                   devices: _filteredDevices,
                   newDeviceIds: _newDeviceIds,
                   onDeviceTap: _showDeviceDetails,
+                  gateway: network?.gateway,
+                  clusters: _buildMeshClusters(_filteredDevices),
                   framed: false,
                 ),
               ),
@@ -881,6 +1000,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
             profiles: entry.value,
             currentSsid: _currentSsid,
             scans: _networkScans,
+            bands: _profileBands,
             isScanning: _isScanning,
             onScan: _scanNetwork,
             onShowDevices: (profile) => setState(() {
@@ -936,6 +1056,8 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
           devices: devices,
           newDeviceIds: _newDeviceIds,
           onDeviceTap: _showDeviceDetails,
+          gateway: _lastResult?.context.gateway,
+          clusters: _buildMeshClusters(devices),
         ),
         _DashboardView.cards => _DeviceCardGrid(
           devices: devices,
@@ -984,6 +1106,54 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
           return fields.any((field) => field.toLowerCase().contains(query));
         })
         .toList(growable: false);
+  }
+
+  // Groups devices into per-router clusters using the gateway recorded for each
+  // scanned network. Returns null when fewer than two distinct gateways are
+  // known, so the mesh falls back to a single hub. Note: two routers joined by
+  // a wired LAN in AP/bridge mode share one gateway and therefore appear as a
+  // single cluster; only a double-NAT setup (separate gateways) splits them.
+  List<_MeshCluster>? _buildMeshClusters(List<NetworkDevice> devices) {
+    final byId = {for (final device in devices) device.id: device};
+    final gatewayToIds = <String, Set<String>>{};
+    for (final record in _networkScans.values) {
+      if (record.failed) continue;
+      final gateway = record.gateway;
+      if (gateway == null || gateway.isEmpty) continue;
+      gatewayToIds
+          .putIfAbsent(gateway, () => <String>{})
+          .addAll(record.deviceIds.where(byId.containsKey));
+    }
+    if (gatewayToIds.length < 2) return null;
+
+    final assigned = <String>{};
+    final clusters = <_MeshCluster>[];
+    for (final entry in gatewayToIds.entries) {
+      NetworkDevice? hub;
+      final members = <NetworkDevice>[];
+      for (final id in entry.value) {
+        final device = byId[id];
+        if (device == null || !assigned.add(id)) continue;
+        members.add(device);
+        if (device.ipAddresses.contains(entry.key)) hub = device;
+      }
+      if (members.isEmpty) continue;
+      clusters.add(
+        _MeshCluster(
+          label: hub?.displayName ?? '공유기 · ${entry.key}',
+          hub: hub,
+          members: members,
+        ),
+      );
+    }
+
+    final leftovers = devices
+        .where((device) => !assigned.contains(device.id))
+        .toList(growable: false);
+    if (leftovers.isNotEmpty) {
+      clusters.add(_MeshCluster(label: '기타 관측', members: leftovers));
+    }
+    return clusters.length < 2 ? null : clusters;
   }
 
   List<Widget> _findingsChildren(BuildContext context) {
@@ -1725,6 +1895,7 @@ class _TopBar extends StatelessWidget {
     required this.onScanAll,
     required this.onNetworks,
     required this.onSettings,
+    required this.onTapNetwork,
   });
 
   final bool isScanning;
@@ -1732,69 +1903,108 @@ class _TopBar extends StatelessWidget {
   final VoidCallback? onScanAll;
   final VoidCallback onNetworks;
   final VoidCallback onSettings;
+  final VoidCallback? onTapNetwork;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
       height: 58,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: scheme.surface,
         border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
       ),
       child: MediaQuery.withClampedTextScaling(
         maxScaleFactor: 1.3,
-        child: Row(
+        child: Stack(
+          alignment: Alignment.center,
           children: [
-            Icon(Icons.wifi_tethering, color: scheme.primary, size: 22),
-            const SizedBox(width: 10),
-            Flexible(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
+            Align(
+              alignment: Alignment.center,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 200),
+                child: _CurrentNetworkChip(
+                  ssid: currentSsid,
+                  onTap: onTapNetwork,
+                ),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    'WifiScan',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                  Text(
-                    _buildVersion,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      fontSize: 10,
-                      color: scheme.onSurfaceVariant,
-                    ),
+                  Icon(Icons.wifi_tethering, color: scheme.primary, size: 22),
+                  const SizedBox(width: 8),
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'WifiScan',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.4,
+                            ),
+                      ),
+                      Text(
+                        _buildVersion,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          fontSize: 10,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            Expanded(
-              child: Center(child: _CurrentNetworkChip(ssid: currentSsid)),
-            ),
-            IconButton(
-              onPressed: onScanAll,
-              icon: Icon(isScanning ? Icons.sync : Icons.travel_explore),
-              tooltip: '전체 네트워크 스캔',
-              visualDensity: VisualDensity.compact,
-            ),
-            IconButton(
-              onPressed: onNetworks,
-              icon: const Icon(Icons.wifi_find_outlined),
-              tooltip: '네트워크 프로필',
-              visualDensity: VisualDensity.compact,
-            ),
-            IconButton(
-              onPressed: onSettings,
-              icon: const Icon(Icons.settings_outlined),
-              tooltip: '설정',
-              visualDensity: VisualDensity.compact,
+            Align(
+              alignment: Alignment.centerRight,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    onPressed: onScanAll,
+                    icon: Icon(isScanning ? Icons.sync : Icons.travel_explore),
+                    tooltip: '전체 네트워크 스캔',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 34,
+                      height: 34,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: onNetworks,
+                    icon: const Icon(Icons.wifi_find_outlined),
+                    tooltip: '네트워크 프로필',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 34,
+                      height: 34,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: onSettings,
+                    icon: const Icon(Icons.settings_outlined),
+                    tooltip: '설정',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 34,
+                      height: 34,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -2029,6 +2239,7 @@ class _RouterGroupCard extends StatelessWidget {
     required this.profiles,
     required this.currentSsid,
     required this.scans,
+    required this.bands,
     required this.isScanning,
     required this.onScan,
     required this.onShowDevices,
@@ -2038,6 +2249,7 @@ class _RouterGroupCard extends StatelessWidget {
   final List<NetworkProfile> profiles;
   final String? currentSsid;
   final Map<String, _NetworkScanRecord> scans;
+  final Map<String, WifiBand> bands;
   final bool isScanning;
   final ValueChanged<NetworkProfile> onScan;
   final ValueChanged<NetworkProfile> onShowDevices;
@@ -2078,6 +2290,7 @@ class _RouterGroupCard extends StatelessWidget {
               profile: profile,
               isConnected: currentSsid == profile.ssid,
               record: scans[profile.id],
+              band: _resolveBand(profile, bands),
               isScanning: isScanning,
               onScan: () => onScan(profile),
               onTap: () => onShowDevices(profile),
@@ -2094,6 +2307,7 @@ class _NetworkRow extends StatelessWidget {
     required this.profile,
     required this.isConnected,
     required this.record,
+    required this.band,
     required this.isScanning,
     required this.onScan,
     required this.onTap,
@@ -2102,6 +2316,7 @@ class _NetworkRow extends StatelessWidget {
   final NetworkProfile profile;
   final bool isConnected;
   final _NetworkScanRecord? record;
+  final WifiBand band;
   final bool isScanning;
   final VoidCallback onScan;
   final VoidCallback onTap;
@@ -2109,7 +2324,7 @@ class _NetworkRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final is5Ghz = _is5GhzSsid(profile.ssid);
+    final is5Ghz = band == WifiBand.ghz5 || band == WifiBand.ghz6;
     final status = record == null
         ? '아직 스캔하지 않았습니다.'
         : record!.failed
@@ -2121,20 +2336,27 @@ class _NetworkRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              decoration: BoxDecoration(
-                color: (is5Ghz ? scheme.primary : scheme.tertiary).withValues(
-                  alpha: 0.16,
-                ),
-                borderRadius: BorderRadius.circular(7),
-              ),
-              child: Text(
-                is5Ghz ? '5G' : '2.4G',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  color: is5Ghz ? scheme.primary : scheme.tertiary,
+            SizedBox(
+              width: 42,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  alignment: Alignment.center,
+                  width: 40,
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  decoration: BoxDecoration(
+                    color: (is5Ghz ? scheme.primary : scheme.tertiary)
+                        .withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                  child: Text(
+                    band.label.isNotEmpty ? band.label : '?',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: is5Ghz ? scheme.primary : scheme.tertiary,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -2193,9 +2415,10 @@ class _NetworkRow extends StatelessWidget {
 }
 
 class _CurrentNetworkChip extends StatelessWidget {
-  const _CurrentNetworkChip({required this.ssid});
+  const _CurrentNetworkChip({required this.ssid, this.onTap});
 
   final String? ssid;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -2205,34 +2428,46 @@ class _CurrentNetworkChip extends StatelessWidget {
         ? const Color(0xFF2E3038)
         : const Color(0xFFE4E4EA);
     final connected = ssid != null && ssid!.isNotEmpty;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: MediaQuery.withClampedTextScaling(
-        maxScaleFactor: 1.3,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              connected ? Icons.wifi : Icons.wifi_off,
-              size: 16,
-              color: connected ? scheme.primary : scheme.onSurfaceVariant,
+    return Material(
+      color: background,
+      borderRadius: BorderRadius.circular(22),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          child: MediaQuery.withClampedTextScaling(
+            maxScaleFactor: 1.3,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  connected ? Icons.wifi : Icons.wifi_off,
+                  size: 16,
+                  color: connected ? scheme.primary : scheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    connected ? ssid! : '연결된 네트워크 없음',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                if (onTap != null) ...[
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.expand_more,
+                    size: 18,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ],
+              ],
             ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                connected ? ssid! : '연결된 네트워크 없음',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -2516,17 +2751,47 @@ class _DeviceCardGrid extends StatelessWidget {
   }
 }
 
+class _MeshCluster {
+  const _MeshCluster({
+    required this.label,
+    required this.members,
+    this.hub,
+  });
+
+  final String label;
+  final NetworkDevice? hub;
+  final List<NetworkDevice> members;
+}
+
+class _MeshEdge {
+  const _MeshEdge(this.from, this.to);
+
+  final Offset from;
+  final Offset to;
+}
+
+class _MeshLabel {
+  const _MeshLabel(this.text, this.position);
+
+  final String text;
+  final Offset position;
+}
+
 class _MeshNetworkView extends StatelessWidget {
   const _MeshNetworkView({
     required this.devices,
     required this.newDeviceIds,
     required this.onDeviceTap,
+    this.gateway,
+    this.clusters,
     this.framed = true,
   });
 
   final List<NetworkDevice> devices;
   final Set<String> newDeviceIds;
   final ValueChanged<NetworkDevice> onDeviceTap;
+  final String? gateway;
+  final List<_MeshCluster>? clusters;
   final bool framed;
 
   @override
@@ -2538,56 +2803,128 @@ class _MeshNetworkView extends StatelessWidget {
     );
   }
 
+  NetworkDevice? _hubDevice() {
+    for (final device in devices) {
+      if (gateway != null && device.ipAddresses.contains(gateway)) {
+        return device;
+      }
+    }
+    for (final device in devices) {
+      if (device.category == DeviceCategory.router) return device;
+    }
+    for (final device in devices) {
+      if (device.sources.contains(DiscoverySource.localInterface)) {
+        return device;
+      }
+    }
+    return null;
+  }
+
+  List<_MeshCluster> _activeClusters() {
+    final source = clusters;
+    if (source != null && source.length > 1) return source;
+    return [_MeshCluster(label: '', hub: _hubDevice(), members: devices)];
+  }
+
   Widget _content(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewHeight = constraints.maxHeight.isFinite
             ? constraints.maxHeight
             : 440.0;
-        final center = Offset(constraints.maxWidth / 2, viewHeight / 2);
+        final width = constraints.maxWidth;
+        final center = Offset(width / 2, viewHeight / 2);
+        final active = _activeClusters();
+        final clusterCount = active.length;
+        final minSide = math.min(width, viewHeight);
+        final clusterRadius = clusterCount == 1 ? 0.0 : minSide * 0.3;
+        final memberSpread = minSide * (clusterCount == 1 ? 0.32 : 0.16);
+
         final positions = <String, Offset>{};
-        final local = devices.cast<NetworkDevice?>().firstWhere(
-          (device) => device!.sources.contains(DiscoverySource.localInterface),
-          orElse: () => null,
-        );
-        if (local != null) positions[local.id] = center;
-        final others = devices
-            .where((device) => device != local)
-            .toList(growable: false);
-        final radiusBase = math.min(constraints.maxWidth, 360.0);
-        for (var index = 0; index < others.length; index++) {
-          final hash = others[index].id.codeUnits.fold<int>(
-            0,
-            (sum, item) => sum + item,
-          );
-          final angle = (index * 2.399963) + (hash % 31) / 100;
-          final distance = radiusBase * (0.24 + (hash % 23) / 100);
-          positions[others[index].id] = Offset(
-            center.dx + math.cos(angle) * distance,
-            center.dy + math.sin(angle) * distance,
-          );
+        final edges = <_MeshEdge>[];
+        final hubCenters = <Offset>[];
+        final labels = <_MeshLabel>[];
+
+        for (var ci = 0; ci < clusterCount; ci++) {
+          final cluster = active[ci];
+          final clusterCenter = clusterCount == 1
+              ? center
+              : Offset(
+                  center.dx +
+                      math.cos(2 * math.pi * ci / clusterCount - math.pi / 2) *
+                          clusterRadius,
+                  center.dy +
+                      math.sin(2 * math.pi * ci / clusterCount - math.pi / 2) *
+                          clusterRadius,
+                );
+          final hub = cluster.hub;
+          if (hub != null) {
+            positions[hub.id] = clusterCenter;
+            hubCenters.add(clusterCenter);
+          }
+          if (cluster.label.isNotEmpty) {
+            labels.add(_MeshLabel(cluster.label, clusterCenter));
+          }
+          final members = cluster.members
+              .where((device) => device.id != hub?.id)
+              .toList(growable: false);
+          for (var index = 0; index < members.length; index++) {
+            final hash = members[index].id.codeUnits.fold<int>(
+              0,
+              (sum, item) => sum + item,
+            );
+            final angle = (index * 2.399963) + (hash % 31) / 100;
+            final distance = memberSpread * (0.55 + (hash % 23) / 100);
+            final position = Offset(
+              clusterCenter.dx + math.cos(angle) * distance,
+              clusterCenter.dy + math.sin(angle) * distance,
+            );
+            positions[members[index].id] = position;
+            edges.add(_MeshEdge(clusterCenter, position));
+          }
         }
+
         return Stack(
           children: [
             Positioned.fill(
               child: InteractiveViewer(
                 boundaryMargin: const EdgeInsets.all(100),
-                minScale: 0.75,
+                minScale: 0.6,
                 maxScale: 2.5,
                 child: SizedBox(
-                  width: constraints.maxWidth,
+                  width: width,
                   height: viewHeight,
                   child: Stack(
                     children: [
                       Positioned.fill(
                         child: CustomPaint(
                           painter: _MeshNetworkPainter(
-                            positions: positions,
-                            center: center,
+                            edges: edges,
+                            hubs: hubCenters,
                             scheme: Theme.of(context).colorScheme,
+                            showRings: clusterCount == 1,
                           ),
                         ),
                       ),
+                      for (final label in labels)
+                        Positioned(
+                          left: label.position.dx - 64,
+                          top: label.position.dy - 62,
+                          width: 128,
+                          child: Text(
+                            label.text,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ),
                       for (final device in devices)
                         if (positions[device.id] != null)
                           Positioned(
@@ -2615,7 +2952,7 @@ class _MeshNetworkView extends StatelessWidget {
                     color: Theme.of(context).colorScheme.primary,
                   ),
                   const SizedBox(width: 8),
-                  const Text('메시 보기'),
+                  Text(clusterCount > 1 ? '메시 보기 · 공유기 $clusterCount대' : '메시 보기'),
                 ],
               ),
             ),
@@ -2628,39 +2965,57 @@ class _MeshNetworkView extends StatelessWidget {
 
 class _MeshNetworkPainter extends CustomPainter {
   const _MeshNetworkPainter({
-    required this.positions,
-    required this.center,
+    required this.edges,
+    required this.hubs,
     required this.scheme,
+    this.showRings = false,
   });
 
-  final Map<String, Offset> positions;
-  final Offset center;
+  final List<_MeshEdge> edges;
+  final List<Offset> hubs;
   final ColorScheme scheme;
+  final bool showRings;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final ringPaint = Paint()
-      ..color = scheme.outlineVariant.withValues(alpha: 0.42)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    for (final radius in [70.0, 140.0, 210.0]) {
-      canvas.drawCircle(center, math.min(radius, size.width * 0.46), ringPaint);
+    if (showRings && hubs.isNotEmpty) {
+      final ringPaint = Paint()
+        ..color = scheme.outlineVariant.withValues(alpha: 0.42)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1;
+      for (final radius in [70.0, 140.0, 210.0]) {
+        canvas.drawCircle(
+          hubs.first,
+          math.min(radius, size.width * 0.46),
+          ringPaint,
+        );
+      }
+    }
+    if (hubs.length > 1) {
+      final backbonePaint = Paint()
+        ..color = scheme.secondary.withValues(alpha: 0.5)
+        ..strokeWidth = 2.4
+        ..strokeCap = StrokeCap.round;
+      for (var index = 0; index + 1 < hubs.length; index++) {
+        canvas.drawLine(hubs[index], hubs[index + 1], backbonePaint);
+      }
     }
     final edgePaint = Paint()
       ..color = scheme.primary.withValues(alpha: 0.26)
       ..strokeWidth = 1.3;
-    for (final position in positions.values) {
-      if (position != center) canvas.drawLine(center, position, edgePaint);
+    for (final edge in edges) {
+      canvas.drawLine(edge.from, edge.to, edgePaint);
     }
     final centerPaint = Paint()
       ..color = scheme.primary.withValues(alpha: 0.12)
       ..style = PaintingStyle.fill;
-    canvas.drawCircle(center, 54, centerPaint);
+    for (final hub in hubs) {
+      canvas.drawCircle(hub, 46, centerPaint);
+    }
   }
 
   @override
-  bool shouldRepaint(covariant _MeshNetworkPainter oldDelegate) =>
-      oldDelegate.positions != positions || oldDelegate.center != center;
+  bool shouldRepaint(covariant _MeshNetworkPainter oldDelegate) => true;
 }
 
 class _DetailRow extends StatelessWidget {
@@ -3219,6 +3574,19 @@ String _severityLabel(FindingSeverity severity) => switch (severity) {
 
 bool _is5GhzSsid(String ssid) =>
     RegExp(r'5\s*g(hz)?', caseSensitive: false).hasMatch(ssid);
+
+// Prefers a band measured from the live connection during a scan, since an
+// SSID name (e.g. "-L"/"-H") cannot reveal the radio band on its own. Falls
+// back to an SSID hint only before the network has been scanned.
+WifiBand _resolveBand(NetworkProfile profile, Map<String, WifiBand> bands) {
+  final measured = bands[profile.id];
+  if (measured != null && measured != WifiBand.unknown) return measured;
+  if (_is5GhzSsid(profile.ssid)) return WifiBand.ghz5;
+  if (RegExp(r'2[.,]?4\s*g', caseSensitive: false).hasMatch(profile.ssid)) {
+    return WifiBand.ghz24;
+  }
+  return WifiBand.unknown;
+}
 
 String _routerGroupName(String ssid) {
   final base = ssid
