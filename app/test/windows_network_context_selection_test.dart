@@ -68,4 +68,23 @@ void main() {
     expect(selected.interfaceIndex, 21);
     expect(selected.gateway, isEmpty);
   });
+
+  test('binds ping probes to the selected Wi-Fi IPv4 address', () {
+    final arguments = WindowsNetworkDiscoveryService.buildPingArguments(
+      sourceAddress: '192.168.0.29',
+      targetAddress: '192.168.0.50',
+      timeoutMilliseconds: 250,
+    );
+
+    expect(arguments, [
+      '-4',
+      '-n',
+      '1',
+      '-w',
+      '250',
+      '-S',
+      '192.168.0.29',
+      '192.168.0.50',
+    ]);
+  });
 }

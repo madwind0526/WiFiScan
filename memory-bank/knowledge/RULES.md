@@ -69,5 +69,6 @@
 ## Wi-Fi Scan Interface Boundary
 
 - Windows의 현재 SSID 스캔은 활성 Native 802.11 인터페이스만 사용하고 Ethernet을 자동 대체 경로로 사용하지 않는다.
+- Ethernet과 Wi-Fi가 같은 서브넷이어도 능동 probe의 출발 주소를 현재 Wi-Fi IPv4에 고정한다.
 - 같은 게이트웨이와 서브넷을 공유하는 SSID는 L3 탐색 결과가 겹칠 수 있으므로 “SSID에 연결된 장비”로 단정하지 않고 “서브넷에서 관측된 장비”로 표시한다.
 - SSID·밴드별 실제 접속 장비 판정은 사용자 인증을 거친 공유기 접속자 목록이나 공식 관리 API 근거가 있을 때만 제공한다.

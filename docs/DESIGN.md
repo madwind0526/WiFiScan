@@ -115,6 +115,12 @@ Windows에서 Ethernet과 Wi-Fi가 동시에 기본 게이트웨이를 가져도
 
 릴리스 버전은 `1.1.0+2`로 올리고 대시보드와 Windows 실행 파일의 표시 버전을 동일하게 맞춘다.
 
+### Wave 12 동일 서브넷의 탐색 경로 고정
+
+Ethernet과 Wi-Fi가 모두 `192.168.0.0/24`처럼 같은 서브넷에 있으면 Windows는 낮은 인터페이스 메트릭의 Ethernet으로 일반 ping을 전송할 수 있다. 탐색 범위와 이웃 테이블을 Wi-Fi로 선택했더라도 probe가 Ethernet으로 나가면 Wi-Fi 이웃 테이블이 채워지지 않아 장비가 누락된다.
+
+Windows ping에는 `-S <현재 Wi-Fi IPv4>`를 지정해 모든 probe의 출발 주소를 선택된 Wi-Fi 인터페이스에 고정한다. Ethernet은 인터넷 연결에 계속 사용할 수 있지만 WifiScan의 SSID 탐색 패킷에는 사용하지 않는다. 수정 릴리스 버전은 `1.1.1+3`이다.
+
 ## Device Inventory Model
 
 - 내부 장비 ID
@@ -215,6 +221,7 @@ Router / subnet / NSD / mDNS / SSDP observations
 | 9 | OS 보안 저장소와 암호 기반 프로필 가져오기/내보내기 | 완료 |
 | 10 | mDNS·SSDP·역방향 DNS·제한된 TCP 서비스 정보 보강 | 완료 |
 | 11 | Windows Wi-Fi 전용 인터페이스 선택과 서브넷 관측 표현 | 완료 |
+| 12 | 동일 서브넷에서 탐색 패킷을 Wi-Fi 출발 주소에 고정 | 완료 |
 
 ## Verification Gates
 

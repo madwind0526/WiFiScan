@@ -44,6 +44,7 @@ class WindowsNetworkDiscoveryService implements NetworkDiscoveryService {
     );
     await _probeTargets(
       targets,
+      sourceAddress: rawContext.ipv4Address,
       cancellationToken: cancellationToken,
       onProgress: onProgress,
     );
@@ -191,6 +192,7 @@ ConvertTo-Json -InputObject $items -Compress
 
   Future<void> _probeTargets(
     List<String> targets, {
+    required String sourceAddress,
     required DiscoveryCancellationToken cancellationToken,
     required void Function(DiscoveryProgress progress) onProgress,
   }) async {
@@ -203,14 +205,14 @@ ConvertTo-Json -InputObject $items -Compress
         if (index >= targets.length) return;
         nextIndex += 1;
 
-        await Process.run('ping.exe', [
-          '-4',
-          '-n',
-          '1',
-          '-w',
-          pingTimeoutMilliseconds.toString(),
-          targets[index],
-        ]);
+        await Process.run(
+          'ping.exe',
+          buildPingArguments(
+            sourceAddress: sourceAddress,
+            targetAddress: targets[index],
+            timeoutMilliseconds: pingTimeoutMilliseconds,
+          ),
+        );
         completed += 1;
         if (completed == targets.length || completed % 4 == 0) {
           onProgress(
@@ -227,6 +229,23 @@ ConvertTo-Json -InputObject $items -Compress
     final workerCount = min(maxConcurrentProbes, targets.length);
     await Future.wait(List.generate(workerCount, (_) => worker()));
     _throwIfCancelled(cancellationToken);
+  }
+
+  static List<String> buildPingArguments({
+    required String sourceAddress,
+    required String targetAddress,
+    required int timeoutMilliseconds,
+  }) {
+    return [
+      '-4',
+      '-n',
+      '1',
+      '-w',
+      timeoutMilliseconds.toString(),
+      '-S',
+      sourceAddress,
+      targetAddress,
+    ];
   }
 
   Future<List<_NeighborRecord>> _readNeighbors({
