@@ -1,16 +1,59 @@
+import 'package:flutter/services.dart' show rootBundle;
+
 /// Offline OUI (MAC prefix) to vendor lookup.
 ///
 /// The first three octets of a globally-administered MAC address are an IEEE
 /// OUI assigned to a manufacturer. Resolving them locally lets the app name a
 /// vendor for devices that never answer any active probe (mDNS/SSDP/NetBIOS),
-/// with no network calls — matching the app's local-first principle.
+/// with no network calls at scan time — matching the app's local-first
+/// principle.
 ///
-/// This is a curated subset focused on common home and Korean-market devices,
-/// not the full IEEE registry. Add entries as `'AABBCC': 'Vendor'` (upper-case
-/// hex, no separators). Only include assignments you can verify — a wrong
-/// vendor label is worse than none.
+/// The full registry (IEEE data via the Wireshark `manuf` file, ~39k entries)
+/// ships as the bundled asset `assets/oui/oui_manuf.tsv` and is loaded once
+/// via [ensureLoaded]. The small curated map below acts as a seed: it keeps
+/// lookups working when the asset cannot be loaded (e.g. plain unit tests
+/// without a Flutter binding) and its labels override the registry where a
+/// friendlier local name is preferred (e.g. ipTIME, LG전자).
 class OuiVendorDirectory {
   const OuiVendorDirectory();
+
+  static const String _assetPath = 'assets/oui/oui_manuf.tsv';
+
+  /// Registry loaded from [_assetPath]; null until [ensureLoaded] succeeds.
+  static Map<String, String>? _registry;
+  static Future<void>? _loading;
+
+  /// Loads the bundled full OUI registry once. Safe to call repeatedly and
+  /// from concurrent scans; failures fall back to the curated seed silently.
+  static Future<void> ensureLoaded() {
+    if (_registry != null) return Future.value();
+    return _loading ??= _loadRegistry();
+  }
+
+  static Future<void> _loadRegistry() async {
+    try {
+      final text = await rootBundle.loadString(_assetPath);
+      final entries = <String, String>{};
+      for (final line in text.split('\n')) {
+        final separator = line.indexOf('\t');
+        if (separator != 6) continue;
+        final oui = line.substring(0, 6).toUpperCase();
+        final name = line.substring(separator + 1).trim();
+        if (name.isEmpty) continue;
+        entries[oui] = name;
+      }
+      if (entries.isNotEmpty) {
+        // Curated labels win over raw registry names.
+        entries.addAll(_vendors);
+        _registry = entries;
+      }
+    } catch (_) {
+      // Asset unavailable (no Flutter binding, stripped bundle): keep the
+      // curated seed as the lookup source.
+    } finally {
+      _loading = null;
+    }
+  }
 
   static const Map<String, String> _vendors = {
     // EFM Networks (ipTIME) — confirmed by the local router BSSID.
@@ -193,7 +236,7 @@ class OuiVendorDirectory {
     final oui = _normalizedOui(macAddress);
     if (oui == null) return null;
     if (_isLocallyAdministered(oui)) return null;
-    return _vendors[oui];
+    return (_registry ?? _vendors)[oui];
   }
 
   /// Whether [macAddress] is locally administered — i.e. a privacy-randomized

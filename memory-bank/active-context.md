@@ -2,7 +2,7 @@
 
 ## Current Focus
 
-- Wave 20에서 오프라인 OUI 사전(`discovery/domain/oui_vendor_directory.dart`)으로 조용한 장비의 MAC 제조사를 채우고, 이름이 없으면 제조사를 표시명으로 쓴다. 랜덤(로컬 관리) MAC은 "임의 MAC 장비"로 구분한다. OUI 목록은 큐레이션된 부분집합이라 실사용에서 누락 제조사를 추가 보강할 여지가 있다.
+- Wave 20에서 조용한 장비의 MAC 제조사 식별을 구현: IEEE 전체 레지스트리(Wireshark manuf, 39,510개 /24 블록)를 `assets/oui/oui_manuf.tsv`로 내장하고 첫 보강 시 1회 로드한다. 큐레이션 시드는 바인딩 없는 테스트 폴백 + 친숙한 라벨(ipTIME 등) 오버라이드로 유지. 랜덤(로컬 관리) MAC은 "임의 MAC 장비"로 구분한다.
 - Wave 19에서 전체 스캔이 SSID 전환 직후 DHCP 완료 전에 "활성 Wi-Fi 없음"으로 0장비 실패하던 경쟁 상태를 컨텍스트 읽기 재시도(최대 ~10.5초)로 수정했다. 사용자 실기기 전체 스캔 재검증 대기 중.
 - 원격 git 저장소가 없어 push가 불가능하다. gh CLI도 미설치. 사용자에게 원격 URL 또는 GitHub 저장소 생성 여부 확인 필요.
 - Wave 18에서 중앙 스캔 버튼과 동일한 앱 아이콘, 중앙 정렬 명사형 배너 문구를 적용한 `1.3.0+9`을 Windows와 Android에 빌드하고 Android 실기기에 설치했다.

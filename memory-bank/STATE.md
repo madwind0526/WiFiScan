@@ -5,7 +5,7 @@
 - **Wave:** 20
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-17 Wave 20 오프라인 OUI 제조사 사전으로 조용한 장비의 MAC 제조사 자동 식별(랜덤 MAC 구분 포함) 추가, analyze/48 tests 통과
+- **Last Checkpoint:** 2026-07-17 Wave 20 오프라인 OUI 제조사 식별을 IEEE 전체 레지스트리(manuf 39,510개) 내장 자산으로 확장, 실장비(SJIT) 해석 확인, analyze/51 tests 통과
 
 ## Wave History
 

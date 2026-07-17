@@ -38,4 +38,25 @@ void main() {
     final probe = OuiVendorDirectory().vendorFor('88:36:6C:00:00:00');
     expect(probe, isNotNull);
   });
+
+  group('with the bundled full registry', () {
+    setUpAll(() async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      await OuiVendorDirectory.ensureLoaded();
+    });
+
+    test('resolves vendors outside the curated seed', () {
+      // SJIT is a real device observed on the user's LAN and is only present
+      // in the full registry asset, not the curated seed.
+      expect(directory.vendorFor('28:6B:B4:99:A8:B6'), 'SJIT Co., Ltd.');
+    });
+
+    test('curated labels still override raw registry names', () {
+      expect(directory.vendorFor('88:36:6C:C1:D6:84'), 'EFM Networks (ipTIME)');
+    });
+
+    test('still refuses randomized MACs after loading', () {
+      expect(directory.vendorFor('06:11:22:33:44:55'), isNull);
+    });
+  });
 }

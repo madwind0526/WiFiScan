@@ -49,6 +49,7 @@ class NetworkInformationEnricher {
     DiscoveryResult result, {
     required DiscoveryCancellationToken cancellationToken,
   }) async {
+    await OuiVendorDirectory.ensureLoaded();
     final targetAddresses = {
       for (final device in result.devices)
         for (final address in device.ipAddresses)
