@@ -2,10 +2,10 @@
 
 ## Current Wave
 
-- **Wave:** 20
+- **Wave:** 21
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-17 Wave 20 오프라인 OUI 제조사 식별을 IEEE 전체 레지스트리(manuf 39,510개) 내장 자산으로 확장, 실장비(SJIT) 해석 확인, analyze/51 tests 통과
+- **Last Checkpoint:** 2026-07-17 Wave 21 MAC 기준 사용자 지정 장비 이름·소유 상태 영구 저장(DeviceLabelRepository)과 상세 편집 UI 추가, analyze/56 tests 통과. GitHub origin 연결 및 push 완료
 
 ## Wave History
 
@@ -32,6 +32,7 @@
 | 18 | 중앙 스캔 앱 아이콘과 중앙 정렬 명사형 상태 배너 | Done |
 | 19 | Wi-Fi 전환 직후 DHCP 경쟁으로 인한 0장비 스캔 실패 수정 | Done |
 | 20 | 오프라인 OUI 제조사 사전으로 조용한 장비 MAC 제조사 식별 | Done |
+| 21 | MAC 기준 사용자 지정 장비 이름·소유 상태 영구 저장과 편집 UI | Done |
 
 ## Session Notes
 

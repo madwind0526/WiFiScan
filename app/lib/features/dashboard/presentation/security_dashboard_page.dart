@@ -10,6 +10,7 @@ import 'package:wifi_scan/features/discovery/domain/discovery_result.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/platform_network_discovery_service.dart';
 import 'package:wifi_scan/features/inventory/domain/network_device.dart';
 import 'package:wifi_scan/features/inventory/application/inventory_repository.dart';
+import 'package:wifi_scan/features/inventory/application/device_label_repository.dart';
 import 'package:wifi_scan/features/security/domain/security_finding.dart';
 import 'package:wifi_scan/features/discovery/domain/network_context.dart';
 import 'package:wifi_scan/features/security/application/security_risk_analyzer.dart';
@@ -52,6 +53,7 @@ class SecurityDashboardPage extends StatefulWidget {
     this.profileRepository,
     this.profileBackupCodec,
     this.profileTransferFileService,
+    this.deviceLabelRepository,
     this.onThemeModeChanged,
   });
 
@@ -62,6 +64,7 @@ class SecurityDashboardPage extends StatefulWidget {
   final NetworkProfileRepository? profileRepository;
   final ProfileBackupCodec? profileBackupCodec;
   final ProfileTransferFileService? profileTransferFileService;
+  final DeviceLabelRepository? deviceLabelRepository;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
 
   @override
@@ -76,7 +79,11 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   late final NetworkProfileRepository _profileRepository;
   late final ProfileBackupCodec _profileBackupCodec;
   late final ProfileTransferFileService _profileTransferFileService;
+  late final DeviceLabelRepository _deviceLabelRepository;
   NetworkOverview _overview = const NetworkOverview.empty();
+  // Devices as discovered, before user labels are overlaid; kept so labels can
+  // be re-applied in place after an edit without rescanning.
+  List<NetworkDevice> _rawDevices = const [];
   DiscoveryResult? _lastResult;
   DiscoveryProgress? _progress;
   DiscoveryCancellationToken? _cancellationToken;
@@ -115,6 +122,9 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     _profileTransferFileService =
         widget.profileTransferFileService ??
         const PlatformProfileTransferFileService();
+    _deviceLabelRepository =
+        widget.deviceLabelRepository ?? DeviceLabelRepository();
+    _deviceLabelRepository.ensureLoaded();
     _loadNetworkProfiles();
   }
 
@@ -188,7 +198,8 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       } catch (_) {
         storageWarning = true;
       }
-      final devices = inventoryUpdate?.snapshot.devices ?? result.devices;
+      final rawDevices = inventoryUpdate?.snapshot.devices ?? result.devices;
+      final devices = _deviceLabelRepository.applyAll(rawDevices);
       final newDevices = inventoryUpdate?.newDevices ?? const [];
       final findings = inventoryUpdate == null
           ? const <SecurityFinding>[]
@@ -216,6 +227,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
             _profileBands[matchedProfiles.first.id] = scannedBand;
           }
         }
+        _rawDevices = rawDevices;
         _overview = NetworkOverview(
           devices: devices,
           findings: findings,
@@ -343,9 +355,11 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       }
       if (!mounted) return;
       final plans = const ManualRemediationPlanner().build(findings);
+      final rawDevices = devicesById.values.toList(growable: false);
       setState(() {
+        _rawDevices = rawDevices;
         _overview = NetworkOverview(
-          devices: devicesById.values.toList(growable: false),
+          devices: _deviceLabelRepository.applyAll(rawDevices),
           findings: findings,
           lastScannedAt: DateTime.now(),
           newDeviceCount: newDeviceIds.length,
@@ -440,8 +454,9 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
           scannedAt: DateTime.now(),
           gateway: result.context.gateway,
         );
+        _rawDevices = update.snapshot.devices;
         _overview = NetworkOverview(
-          devices: update.snapshot.devices,
+          devices: _deviceLabelRepository.applyAll(update.snapshot.devices),
           findings: analyzed.findings,
           lastScannedAt: DateTime.now(),
           newDeviceCount: update.newDevices.length,
@@ -1600,12 +1615,26 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                               '장비가 공개적으로 응답한 정보입니다.',
                   ),
                   const SizedBox(height: 18),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: () => Navigator.of(dialogContext).pop(),
-                      child: const Text('닫기'),
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.of(dialogContext).pop();
+                            _editDeviceLabel(device);
+                          },
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          label: const Text('이름·소유 편집'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () => Navigator.of(dialogContext).pop(),
+                          child: const Text('닫기'),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -1614,6 +1643,40 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         );
       },
     );
+  }
+
+  Future<void> _editDeviceLabel(NetworkDevice device) async {
+    if (deviceLabelKey(device) == null) {
+      if (!mounted) return;
+      setState(() {
+        _message = '이 장비는 MAC·IP 정보가 없어 이름을 저장할 수 없습니다.';
+        _messageIsError = true;
+      });
+      return;
+    }
+    final current = _deviceLabelRepository.labelFor(device);
+    final result = await showDialog<DeviceLabel>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (dialogContext) => _DeviceLabelEditorDialog(
+        deviceName: device.displayName,
+        autoName: device.vendor,
+        initial: current,
+      ),
+    );
+    if (result == null || !mounted) return;
+    await _deviceLabelRepository.setLabel(device, result);
+    if (!mounted) return;
+    setState(() {
+      _overview = NetworkOverview(
+        devices: _deviceLabelRepository.applyAll(_rawDevices),
+        findings: _overview.findings,
+        lastScannedAt: _overview.lastScannedAt,
+        newDeviceCount: _overview.newDeviceCount,
+      );
+      _message = '장비 정보를 저장했습니다.';
+      _messageIsError = false;
+    });
   }
 }
 
@@ -1759,6 +1822,117 @@ class _ProfileEditorDialogState extends State<_ProfileEditorDialog> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _DeviceLabelEditorDialog extends StatefulWidget {
+  const _DeviceLabelEditorDialog({
+    required this.deviceName,
+    required this.autoName,
+    required this.initial,
+  });
+
+  final String deviceName;
+  final String? autoName;
+  final DeviceLabel initial;
+
+  @override
+  State<_DeviceLabelEditorDialog> createState() =>
+      _DeviceLabelEditorDialogState();
+}
+
+class _DeviceLabelEditorDialogState extends State<_DeviceLabelEditorDialog> {
+  late final TextEditingController _nameController;
+  OwnershipStatus? _ownership;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initial.name ?? '');
+    _ownership = widget.initial.ownershipStatus;
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final name = _nameController.text.trim();
+    Navigator.of(context).pop(
+      DeviceLabel(
+        name: name.isEmpty ? null : name,
+        ownershipStatus: _ownership,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = widget.autoName == null || widget.autoName!.isEmpty
+        ? '예: 거실 스마트플러그'
+        : '예: ${widget.autoName} TV';
+    return _TranslucentDialog(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('장비 이름 지정', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 4),
+          Text(
+            '이름은 이 장비의 MAC 주소 기준으로 저장되어 이후 스캔에도 유지됩니다.',
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _nameController,
+            autofocus: true,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _save(),
+            decoration: InputDecoration(labelText: '표시 이름', hintText: hint),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '비워두면 자동 식별 이름으로 되돌아갑니다.',
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+          const SizedBox(height: 16),
+          Text('소유 상태', style: Theme.of(context).textTheme.labelLarge),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ownershipChip('유지', null),
+              _ownershipChip('내 장비', OwnershipStatus.confirmed),
+              _ownershipChip('미확인', OwnershipStatus.unconfirmed),
+              _ownershipChip('차단 대상', OwnershipStatus.blocked),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('취소'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(onPressed: _save, child: const Text('저장')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _ownershipChip(String label, OwnershipStatus? value) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: _ownership == value,
+      onSelected: (_) => setState(() => _ownership = value),
     );
   }
 }
