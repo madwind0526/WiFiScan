@@ -122,3 +122,11 @@
 - 원인: 그래프는 `_filteredDevices`를 사용했지만 `_MiniSummary`는 `_overview.devices`와 전체 findings를 직접 참조했다.
 - 해결: 홈 빌드에서 한 번 계산한 `visibleDevices`를 그래프와 요약에 함께 전달한다. 경고는 표시 장비 ID에 귀속된 warning/critical만 계산하고, 필터가 없을 때만 네트워크 수준 경고를 포함한다.
 - 검증: 장비 검색으로 2개 중 1개만 표시한 뒤 홈 요약이 장비 `1`, 경고 `0`으로 바뀌는 위젯 회귀 테스트와 전체 40개 테스트를 통과했다.
+
+## Wi-Fi 프로필 전환 직후 스캔이 장비 0개로 즉시 실패
+
+- 확인일: 2026-07-17
+- 증상: 전체 네트워크 스캔이 SSID를 전환하며 돌 때 4개 네트워크 모두 "연결하지 못했습니다"로 즉시 빠지고 장비 0개가 기록됐다. 같은 코드가 안정 연결 상태에서는 통과했다.
+- 원인: `netsh wlan connect`는 SSID 연결(association)까지만 확인하고 반환하는데, DHCP 주소 할당은 그 뒤 몇 초가 더 걸린다. 그 사이 `Get-NetIPConfiguration`은 Wi-Fi 어댑터에 유효한 사설 IPv4가 없다고 보고하고(APIPA 169.254.*는 필터됨), 탐색이 "활성 Wi-Fi 연결을 찾지 못했습니다"로 즉시 실패했다.
+- 해결: `WindowsNetworkDiscoveryService._readPrimaryNetworkContext`를 재시도 루프로 감쌌다(`contextReadAttempts` 기본 7회 × `contextRetryDelay` 1.5초 ≈ 최대 10.5초). 재시도 사이에 취소 토큰을 확인한다.
+- 검증: flutter analyze 통과, 실제 Windows 라이브 스캔 통합 테스트 포함 41개 테스트 전체 통과.

@@ -2,10 +2,10 @@
 
 ## Current Wave
 
-- **Wave:** 18
+- **Wave:** 19
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-16 Wave 18 스캔 앱 아이콘과 중앙 정렬 명사형 배너, analyze/41 tests/Windows·Android v1.3.0+9 빌드 및 Android 실기기 설치 검증 완료
+- **Last Checkpoint:** 2026-07-17 Wave 19 Wi-Fi 전환 직후 DHCP 경쟁으로 스캔이 0개로 즉시 실패하던 문제를 컨텍스트 읽기 재시도로 수정, analyze/41 tests 통과
 
 ## Wave History
 
@@ -30,6 +30,7 @@
 | 16 | 현재 표시 장비·경고와 홈 요약 숫자의 데이터 범위 일치 | Done |
 | 17 | 모든 동적 상태 배너의 반투명 배경·고대비 글씨·닫기 동작 통일 | Done |
 | 18 | 중앙 스캔 앱 아이콘과 중앙 정렬 명사형 상태 배너 | Done |
+| 19 | Wi-Fi 전환 직후 DHCP 경쟁으로 인한 0장비 스캔 실패 수정 | Done |
 
 ## Session Notes
 

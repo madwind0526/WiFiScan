@@ -11,10 +11,14 @@ class WindowsNetworkDiscoveryService implements NetworkDiscoveryService {
   const WindowsNetworkDiscoveryService({
     this.pingTimeoutMilliseconds = 250,
     this.maxConcurrentProbes = 24,
+    this.contextReadAttempts = 7,
+    this.contextRetryDelay = const Duration(milliseconds: 1500),
   });
 
   final int pingTimeoutMilliseconds;
   final int maxConcurrentProbes;
+  final int contextReadAttempts;
+  final Duration contextRetryDelay;
 
   @override
   Future<DiscoveryResult> discover({
@@ -30,7 +34,7 @@ class WindowsNetworkDiscoveryService implements NetworkDiscoveryService {
       ),
     );
 
-    final rawContext = await _readPrimaryNetworkContext();
+    final rawContext = await _readPrimaryNetworkContext(cancellationToken);
     _throwIfCancelled(cancellationToken);
     final scanPlan = _createScanPlan(rawContext);
     final targets = scanPlan.targets;
@@ -132,7 +136,36 @@ class WindowsNetworkDiscoveryService implements NetworkDiscoveryService {
     );
   }
 
-  Future<WindowsNetworkContextCandidate> _readPrimaryNetworkContext() async {
+  /// Reads the active Wi-Fi network context, retrying while the adapter
+  /// settles.
+  ///
+  /// Right after a Wi-Fi profile switch the SSID association completes
+  /// before DHCP does, so for a few seconds the adapter has no usable IPv4
+  /// address or gateway and a single read reports "no active Wi-Fi". A scan
+  /// launched in that window (e.g. the scan-all flow that hops between
+  /// profiles) would otherwise fail instantly with zero devices.
+  Future<WindowsNetworkContextCandidate> _readPrimaryNetworkContext(
+    DiscoveryCancellationToken cancellationToken,
+  ) async {
+    DiscoveryUnavailableException lastFailure = const DiscoveryUnavailableException(
+      '검색 가능한 활성 Wi-Fi IPv4 네트워크를 찾지 못했습니다.',
+    );
+    final attempts = contextReadAttempts < 1 ? 1 : contextReadAttempts;
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(contextRetryDelay);
+        _throwIfCancelled(cancellationToken);
+      }
+      try {
+        return await _readPrimaryNetworkContextOnce();
+      } on DiscoveryUnavailableException catch (error) {
+        lastFailure = error;
+      }
+    }
+    throw lastFailure;
+  }
+
+  Future<WindowsNetworkContextCandidate> _readPrimaryNetworkContextOnce() async {
     const script = r'''
 $items = @(
   Get-NetIPConfiguration | Where-Object {
