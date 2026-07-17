@@ -98,6 +98,64 @@ void main() {
     expect(enriched.devices.single.displayName, 'BID-AT200');
     expect(enriched.devices.single.category, DeviceCategory.television);
   });
+
+  test('names a silent device from its MAC vendor when no probe answers', () async {
+    final now = DateTime(2026, 7, 17);
+    final result = DiscoveryResult(
+      context: const NetworkContext(
+        interfaceName: 'Wi-Fi',
+        interfaceIndex: 1,
+        ipv4Address: '192.168.0.10',
+        prefixLength: 24,
+        gateway: '192.168.0.1',
+        scannedNetwork: '192.168.0.0',
+        scannedPrefixLength: 24,
+        coverageLimited: false,
+      ),
+      devices: [
+        NetworkDevice(
+          id: 'aa',
+          displayName: '확인되지 않은 장비',
+          category: DeviceCategory.unknown,
+          ownershipStatus: OwnershipStatus.unconfirmed,
+          ipAddresses: const ['192.168.0.40'],
+          sources: const [DiscoverySource.neighbor],
+          firstSeenAt: now,
+          lastSeenAt: now,
+          identityConfidence: 0.85,
+          macAddress: '88:36:6C:C1:D6:84',
+        ),
+        NetworkDevice(
+          id: 'bb',
+          displayName: '확인되지 않은 장비',
+          category: DeviceCategory.unknown,
+          ownershipStatus: OwnershipStatus.unconfirmed,
+          ipAddresses: const ['192.168.0.41'],
+          sources: const [DiscoverySource.neighbor],
+          firstSeenAt: now,
+          lastSeenAt: now,
+          identityConfidence: 0.6,
+          macAddress: '06:11:22:33:44:55',
+        ),
+      ],
+      limitations: const [],
+      duration: Duration.zero,
+    );
+    const enricher = NetworkInformationEnricher(providers: []);
+
+    final enriched = await enricher.enrich(
+      result,
+      cancellationToken: DiscoveryCancellationToken(),
+    );
+
+    final withVendor = enriched.devices.firstWhere((d) => d.id == 'aa');
+    expect(withVendor.vendor, 'EFM Networks (ipTIME)');
+    expect(withVendor.displayName, 'EFM Networks (ipTIME)');
+
+    final randomized = enriched.devices.firstWhere((d) => d.id == 'bb');
+    expect(randomized.vendor, isNull);
+    expect(randomized.displayName, '임의 MAC 장비');
+  });
 }
 
 class _FakeEnrichmentProvider implements NetworkEnrichmentProvider {

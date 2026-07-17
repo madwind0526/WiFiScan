@@ -67,3 +67,7 @@ ICMP/neighbor 결과만으로 부족한 장비 정보를 역방향 DNS, mDNS/DNS
 ## Reproducible Multi-Platform App Icon
 
 Flutter UI에서 사용하는 Material 아이콘을 앱 아이콘으로 재사용할 때는 Flutter SDK의 `materialicons-regular.otf`와 `IconData` 코드포인트를 사용해 고해상도 원본을 생성한다. 하나의 생성 도구가 Windows 다중 해상도 ICO와 Android mdpi~xxxhdpi PNG를 모두 출력하게 하면 플랫폼별 아이콘 모양과 색상이 어긋나지 않는다. 고해상도 원본과 생성 도구를 함께 저장해 바이너리 자산을 재현 가능하게 유지한다.
+
+## MAC OUI 오프라인 제조사 식별
+
+능동 프로브(mDNS/SSDP/NetBIOS/역방향 DNS)에 응답하지 않는 조용한 장비도 이웃 테이블의 MAC 주소는 갖고 있다. MAC 앞 3옥텟(OUI)은 IEEE가 제조사에 할당한 값이므로, 내장 오프라인 사전으로 외부 통신 없이 제조사를 표시할 수 있다(로컬 우선 원칙 부합). `NetworkInformationEnricher`에서 능동 프로브 수집과 분리해 항상 적용한다: 기존 vendor가 없으면 OUI로 채우고, 표시명이 미확인이면 제조사를 표시명으로 승격한다. 첫 옥텟의 0x02 비트(로컬 관리 주소)가 켜진 MAC은 사생활 보호용 랜덤/가상 주소이므로 제조사로 매핑하지 않고 "임의 MAC 장비"로 구분해 오식별을 막는다. OUI 사전은 전체 IEEE 레지스트리가 아니라 검증된 큐레이션 부분집합으로 유지한다(잘못된 라벨이 무라벨보다 나쁨).
