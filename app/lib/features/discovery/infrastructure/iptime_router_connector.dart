@@ -103,6 +103,116 @@ class IptimeRouterConnector {
     }
   }
 
+  /// Endpoints under `timepro.cgi` that ipTIME firmwares expose the DHCP /
+  /// connected-device list on. Tried in order until one yields entries, since
+  /// the exact page varies by firmware.
+  static const List<(String, String)> dhcpPageCandidates = [
+    ('netconf', 'lansetup'),
+    ('netconf', 'dhcpserverset'),
+    ('netconf', 'dhcpsummary'),
+    ('iframe', 'internetstatus'),
+  ];
+
+  /// Reads the router's DHCP client list with an active [session].
+  ///
+  /// Returns an empty list if the router exposes none of the known pages; the
+  /// caller treats that as "no data" rather than an error.
+  Future<List<RouterDhcpClient>> readDhcpClients({
+    required String host,
+    required String session,
+  }) async {
+    for (final (tmenu, smenu) in dhcpPageCandidates) {
+      try {
+        final body = await fetchAdminPage(
+          host: host,
+          session: session,
+          tmenu: tmenu,
+          smenu: smenu,
+        );
+        final clients = parseDhcpClients(body);
+        if (clients.isNotEmpty) return clients;
+      } on RouterQueryException {
+        rethrow;
+      } catch (_) {
+        // Try the next candidate page.
+      }
+    }
+    return const [];
+  }
+
+  static final _ipv4 = RegExp(r'\b(?:\d{1,3}\.){3}\d{1,3}\b');
+  static final _mac = RegExp(
+    r'\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b',
+  );
+
+  /// Extracts DHCP client rows from an ipTIME admin page.
+  ///
+  /// Firmware differs (HTML tables vs JavaScript arrays vs delimited strings),
+  /// so this splits the body into records and keeps any record carrying both
+  /// an IPv4 and a MAC, treating the leftover text as the hostname. This is
+  /// format-agnostic within ipTIME's page shapes.
+  static List<RouterDhcpClient> parseDhcpClients(String body) {
+    final records = body.split(RegExp(r'</tr>|;|\n', caseSensitive: false));
+    final byIp = <String, RouterDhcpClient>{};
+    for (final record in records) {
+      final mac = _mac.firstMatch(record)?.group(0);
+      if (mac == null) continue;
+      final ip = _ipv4
+          .allMatches(record)
+          .map((m) => m.group(0)!)
+          .where(_isUsableIpv4)
+          .cast<String?>()
+          .firstWhere((_) => true, orElse: () => null);
+      if (ip == null) continue;
+      final hostname = _extractHostname(record, ip: ip, mac: mac);
+      byIp[ip] = RouterDhcpClient(
+        ipAddress: ip,
+        macAddress: mac,
+        hostname: hostname,
+      );
+    }
+    return byIp.values.toList(growable: false);
+  }
+
+  static bool _isUsableIpv4(String ip) {
+    final parts = ip.split('.');
+    if (parts.length != 4) return false;
+    for (final part in parts) {
+      final n = int.tryParse(part);
+      if (n == null || n < 0 || n > 255) return false;
+    }
+    return ip != '0.0.0.0' && ip != '255.255.255.255';
+  }
+
+  static String? _extractHostname(
+    String record, {
+    required String ip,
+    required String mac,
+  }) {
+    var text = record
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        .replaceAll(ip, ' ')
+        .replaceAll(mac, ' ');
+    // Drop other addresses (subnet mask, lease-time numbers) and quotes.
+    text = text.replaceAll(_ipv4, ' ').replaceAll(RegExp(r'["\x27,|]'), ' ');
+    final tokens = text
+        .split(RegExp(r'\s+'))
+        .map((t) => t.trim())
+        .where(_looksLikeHostname)
+        .toList();
+    if (tokens.isEmpty) return null;
+    // The longest hostname-shaped token is the most likely device name.
+    tokens.sort((a, b) => b.length.compareTo(a.length));
+    return tokens.first;
+  }
+
+  static final _hostnameToken = RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{1,}$');
+  static final _hasLetter = RegExp('[A-Za-z]');
+
+  static bool _looksLikeHostname(String token) {
+    return _hostnameToken.hasMatch(token) && _hasLetter.hasMatch(token);
+  }
+
   void close() => _client.close(force: true);
 
   static String? _sessionCookie(HttpClientResponse response) {

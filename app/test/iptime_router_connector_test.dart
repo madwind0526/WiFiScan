@@ -63,4 +63,37 @@ void main() {
       expect(noHost.credentials(), isNull);
     });
   });
+
+  group('IptimeRouterConnector.parseDhcpClients', () {
+    test('parses an HTML table of leases', () {
+      const body = '''
+        <table>
+        <tr><td>192.168.0.10</td><td>88:36:6C:C1:D6:84</td><td>living-room-tv</td></tr>
+        <tr><td>192.168.0.11</td><td>28-6B-B4-99-A8-B6</td><td>settop</td></tr>
+        </table>
+      ''';
+      final clients = IptimeRouterConnector.parseDhcpClients(body);
+      expect(clients.length, 2);
+      final tv = clients.firstWhere((c) => c.ipAddress == '192.168.0.10');
+      expect(tv.normalizedMac, '88:36:6C:C1:D6:84');
+      expect(tv.hostname, 'living-room-tv');
+    });
+
+    test('parses delimited JavaScript-style records', () {
+      const body =
+          'dhcp[0]="192.168.0.20|A0:0B:BA:11:22:33|my-phone|3600";\n'
+          'dhcp[1]="192.168.0.21|5C:CF:7F:44:55:66|esp-plug|7200";';
+      final clients = IptimeRouterConnector.parseDhcpClients(body);
+      expect(clients.length, 2);
+      expect(
+        clients.firstWhere((c) => c.ipAddress == '192.168.0.21').hostname,
+        'esp-plug',
+      );
+    });
+
+    test('ignores records without both an IP and a MAC', () {
+      const body = '<tr><td>192.168.0.30</td><td>no-mac-here</td></tr>';
+      expect(IptimeRouterConnector.parseDhcpClients(body), isEmpty);
+    });
+  });
 }

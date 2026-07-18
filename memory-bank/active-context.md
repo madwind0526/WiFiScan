@@ -2,7 +2,8 @@
 
 ## Current Focus
 
-- Wave 21에서 MAC(없으면 IP) 기준으로 사용자 지정 이름·소유 상태를 `device_labels.json`에 영구 저장하는 `DeviceLabelRepository`를 추가했다. 세 스캔 흐름의 장비 생성 지점에서 라벨을 오버레이(사용자 이름이 자동 식별보다 우선)하고, 장비 상세의 "이름·소유 편집"에서 수정한다. 원본 장비(`_rawDevices`)를 보관해 편집 후 재스캔 없이 라벨을 다시 적용한다. IoT처럼 제조사만으로 제품 구분이 안 되는 경우의 해법.
+- Wave 22에서 읽기 전용 ipTIME 공유기 커넥터를 추가했다. 라이브 A6004NS-M로 검증: Dart HttpClient가 비표준 HTTP/1.0을 처리하고, 로그인은 POST `/sess-bin/login_handler.cgi`→`efm_session_id` 쿠키, 관리 페이지는 `timepro.cgi`. 자격증명은 `.env`(DotEnv, gitignore) 또는 공유기별 보안 저장소(`SecureRouterCredentialStore`, 게이트웨이 IP 키)에서 로드하고 절대 추측하지 않는다. 메시의 GW 노드를 클릭하면 해당 게이트웨이 로그인 팝업(`_RouterLoginDialog`)이 뜨고, 로그인 성공 시 DHCP 목록을 읽어 MAC 기준으로 `_dhcpHostnames`에 저장→`_composeDevices`가 자동 이름 위에 호스트네임을 오버레이(사용자 라벨 > DHCP 호스트네임 > 자동). DHCP 파서는 여러 후보 엔드포인트+범용 IP/MAC 레코드 파싱으로 firmware 형식차를 흡수하되, 실제 페이지로 재검증 필요. 사용자 공유기 2대는 서로 다른 서브넷(192.168.0.1, 192.168.45.1)이며 둘 다 현재 위치에서 도달 가능.
+- Wave 21에서 MAC(없으면 IP) 기준으로 사용자 지정 이름·소유 상태를 `device_labels.json`에 영구 저장하는 `DeviceLabelRepository`를 추가했다. 장비 상세의 "이름·소유 편집"에서 수정하고, 사용자 이름이 자동 식별보다 우선한다.
 - Wave 20에서 조용한 장비의 MAC 제조사 식별을 구현: IEEE 전체 레지스트리(Wireshark manuf, 39,510개 /24 블록)를 `assets/oui/oui_manuf.tsv`로 내장하고 첫 보강 시 1회 로드한다. 큐레이션 시드는 바인딩 없는 테스트 폴백 + 친숙한 라벨(ipTIME 등) 오버라이드로 유지. 랜덤(로컬 관리) MAC은 "임의 MAC 장비"로 구분한다.
 - Wave 19에서 전체 스캔이 SSID 전환 직후 DHCP 완료 전에 "활성 Wi-Fi 없음"으로 0장비 실패하던 경쟁 상태를 컨텍스트 읽기 재시도(최대 ~10.5초)로 수정했다. 사용자 실기기 전체 스캔 재검증 대기 중.
 - 원격 git 저장소가 없어 push가 불가능하다. gh CLI도 미설치. 사용자에게 원격 URL 또는 GitHub 저장소 생성 여부 확인 필요.

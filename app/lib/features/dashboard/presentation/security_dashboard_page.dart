@@ -11,6 +11,9 @@ import 'package:wifi_scan/features/discovery/infrastructure/platform_network_dis
 import 'package:wifi_scan/features/inventory/domain/network_device.dart';
 import 'package:wifi_scan/features/inventory/application/inventory_repository.dart';
 import 'package:wifi_scan/features/inventory/application/device_label_repository.dart';
+import 'package:wifi_scan/features/discovery/domain/router_dhcp_client.dart';
+import 'package:wifi_scan/features/discovery/infrastructure/iptime_router_connector.dart';
+import 'package:wifi_scan/features/discovery/infrastructure/router_credential_store.dart';
 import 'package:wifi_scan/features/security/domain/security_finding.dart';
 import 'package:wifi_scan/features/discovery/domain/network_context.dart';
 import 'package:wifi_scan/features/security/application/security_risk_analyzer.dart';
@@ -54,6 +57,7 @@ class SecurityDashboardPage extends StatefulWidget {
     this.profileBackupCodec,
     this.profileTransferFileService,
     this.deviceLabelRepository,
+    this.routerCredentialStore,
     this.onThemeModeChanged,
   });
 
@@ -65,6 +69,7 @@ class SecurityDashboardPage extends StatefulWidget {
   final ProfileBackupCodec? profileBackupCodec;
   final ProfileTransferFileService? profileTransferFileService;
   final DeviceLabelRepository? deviceLabelRepository;
+  final RouterCredentialStore? routerCredentialStore;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
 
   @override
@@ -80,10 +85,14 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   late final ProfileBackupCodec _profileBackupCodec;
   late final ProfileTransferFileService _profileTransferFileService;
   late final DeviceLabelRepository _deviceLabelRepository;
+  late final RouterCredentialStore _routerCredentialStore;
   NetworkOverview _overview = const NetworkOverview.empty();
   // Devices as discovered, before user labels are overlaid; kept so labels can
   // be re-applied in place after an edit without rescanning.
   List<NetworkDevice> _rawDevices = const [];
+  // Hostnames read from a router's DHCP list, keyed by normalized MAC. Overlaid
+  // onto matching devices whose name is still auto-derived.
+  final Map<String, String> _dhcpHostnames = {};
   DiscoveryResult? _lastResult;
   DiscoveryProgress? _progress;
   DiscoveryCancellationToken? _cancellationToken;
@@ -125,6 +134,8 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     _deviceLabelRepository =
         widget.deviceLabelRepository ?? DeviceLabelRepository();
     _deviceLabelRepository.ensureLoaded();
+    _routerCredentialStore =
+        widget.routerCredentialStore ?? SecureRouterCredentialStore();
     _loadNetworkProfiles();
   }
 
@@ -199,7 +210,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         storageWarning = true;
       }
       final rawDevices = inventoryUpdate?.snapshot.devices ?? result.devices;
-      final devices = _deviceLabelRepository.applyAll(rawDevices);
+      final devices = _composeDevices(rawDevices);
       final newDevices = inventoryUpdate?.newDevices ?? const [];
       final findings = inventoryUpdate == null
           ? const <SecurityFinding>[]
@@ -359,7 +370,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       setState(() {
         _rawDevices = rawDevices;
         _overview = NetworkOverview(
-          devices: _deviceLabelRepository.applyAll(rawDevices),
+          devices: _composeDevices(rawDevices),
           findings: findings,
           lastScannedAt: DateTime.now(),
           newDeviceCount: newDeviceIds.length,
@@ -456,7 +467,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         );
         _rawDevices = update.snapshot.devices;
         _overview = NetworkOverview(
-          devices: _deviceLabelRepository.applyAll(update.snapshot.devices),
+          devices: _composeDevices(update.snapshot.devices),
           findings: analyzed.findings,
           lastScannedAt: DateTime.now(),
           newDeviceCount: update.newDevices.length,
@@ -1508,6 +1519,11 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   }
 
   Future<void> _showDeviceDetails(NetworkDevice device) async {
+    final gatewayHost = _gatewayHostFor(device);
+    if (gatewayHost != null) {
+      await _showRouterLogin(gatewayHost);
+      return;
+    }
     await showDialog<void>(
       context: context,
       barrierColor: Colors.black54,
@@ -1668,13 +1684,88 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     await _deviceLabelRepository.setLabel(device, result);
     if (!mounted) return;
     setState(() {
-      _overview = NetworkOverview(
-        devices: _deviceLabelRepository.applyAll(_rawDevices),
-        findings: _overview.findings,
-        lastScannedAt: _overview.lastScannedAt,
-        newDeviceCount: _overview.newDeviceCount,
-      );
+      _overview = _rebuiltOverview();
       _message = '장비 정보를 저장했습니다.';
+      _messageIsError = false;
+    });
+  }
+
+  // Overlays, in precedence order, DHCP hostnames then user labels onto the
+  // raw discovered devices. A user label always wins; a DHCP hostname replaces
+  // only an auto-derived name.
+  List<NetworkDevice> _composeDevices(Iterable<NetworkDevice> raw) {
+    return [
+      for (final device in raw)
+        _deviceLabelRepository.apply(_applyDhcpHostname(device)),
+    ];
+  }
+
+  NetworkDevice _applyDhcpHostname(NetworkDevice device) {
+    final mac = device.macAddress;
+    if (mac == null) return device;
+    final hostname = _dhcpHostnames[mac];
+    if (hostname == null || hostname.isEmpty) return device;
+    final isAutoName =
+        device.displayName == '확인되지 않은 장비' ||
+        device.displayName == '임의 MAC 장비' ||
+        device.displayName == device.vendor;
+    return device.copyWith(
+      displayName: isAutoName ? hostname : device.displayName,
+      hostnames: {...device.hostnames, hostname}.toList(),
+    );
+  }
+
+  NetworkOverview _rebuiltOverview() {
+    return NetworkOverview(
+      devices: _composeDevices(_rawDevices),
+      findings: _overview.findings,
+      lastScannedAt: _overview.lastScannedAt,
+      newDeviceCount: _overview.newDeviceCount,
+    );
+  }
+
+  /// The admin host for a tapped gateway/router device, or null if it is an
+  /// ordinary device. Matches the device's IP against the known gateways.
+  String? _gatewayHostFor(NetworkDevice device) {
+    final gateways = <String>{
+      if (_lastResult?.context.gateway != null) _lastResult!.context.gateway,
+      for (final record in _networkScans.values)
+        if (record.gateway != null && record.gateway!.isNotEmpty)
+          record.gateway!,
+    };
+    for (final ip in device.ipAddresses) {
+      if (gateways.contains(ip)) return ip;
+    }
+    return null;
+  }
+
+  Future<void> _showRouterLogin(String host) async {
+    final saved = await _routerCredentialStore.read(host);
+    if (!mounted) return;
+    final result = await showDialog<List<RouterDhcpClient>>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (dialogContext) => _RouterLoginDialog(
+        host: host,
+        saved: saved,
+        credentialStore: _routerCredentialStore,
+      ),
+    );
+    if (result == null || !mounted) return;
+    var applied = 0;
+    for (final client in result) {
+      final mac = client.normalizedMac;
+      final hostname = client.hostname;
+      if (mac != null && hostname != null && hostname.isNotEmpty) {
+        _dhcpHostnames[mac] = hostname;
+        applied++;
+      }
+    }
+    setState(() {
+      _overview = _rebuiltOverview();
+      _message = result.isEmpty
+          ? '$host 로그인에 성공했지만 DHCP 목록을 찾지 못했습니다.'
+          : '$host에서 장비 $applied개의 이름을 가져왔습니다.';
       _messageIsError = false;
     });
   }
@@ -1933,6 +2024,187 @@ class _DeviceLabelEditorDialogState extends State<_DeviceLabelEditorDialog> {
       label: Text(label),
       selected: _ownership == value,
       onSelected: (_) => setState(() => _ownership = value),
+    );
+  }
+}
+
+class _RouterLoginDialog extends StatefulWidget {
+  const _RouterLoginDialog({
+    required this.host,
+    required this.saved,
+    required this.credentialStore,
+  });
+
+  final String host;
+  final RouterCredentials? saved;
+  final RouterCredentialStore credentialStore;
+
+  @override
+  State<_RouterLoginDialog> createState() => _RouterLoginDialogState();
+}
+
+class _RouterLoginDialogState extends State<_RouterLoginDialog> {
+  late final TextEditingController _userController;
+  late final TextEditingController _passwordController;
+  bool _obscure = true;
+  bool _remember = true;
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _userController = TextEditingController(
+      text: widget.saved?.username ?? 'admin',
+    );
+    _passwordController = TextEditingController(
+      text: widget.saved?.password ?? '',
+    );
+    _remember = widget.saved != null;
+  }
+
+  @override
+  void dispose() {
+    _userController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _login() async {
+    final password = _passwordController.text;
+    if (password.isEmpty) {
+      setState(() => _error = '관리자 비밀번호를 입력하세요.');
+      return;
+    }
+    final credentials = RouterCredentials(
+      host: widget.host,
+      username: _userController.text.trim().isEmpty
+          ? 'admin'
+          : _userController.text.trim(),
+      password: password,
+    );
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final connector = IptimeRouterConnector();
+    try {
+      final session = await connector.login(credentials);
+      final clients = await connector.readDhcpClients(
+        host: widget.host,
+        session: session,
+      );
+      if (_remember) {
+        await widget.credentialStore.write(credentials);
+      } else {
+        await widget.credentialStore.delete(widget.host);
+      }
+      if (!mounted) return;
+      Navigator.of(context).pop(clients);
+    } on RouterQueryException catch (error) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = error.message;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = '공유기 로그인 중 오류가 발생했습니다.';
+        });
+      }
+    } finally {
+      connector.close();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _TranslucentDialog(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('공유기 관리자 로그인', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 4),
+          Text(
+            '${widget.host} · 읽기 전용으로 접속 장비 목록만 조회합니다.',
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _userController,
+            enabled: !_busy,
+            decoration: const InputDecoration(labelText: '관리자 아이디'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _passwordController,
+            enabled: !_busy,
+            obscureText: _obscure,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _busy ? null : _login(),
+            decoration: InputDecoration(
+              labelText: '관리자 비밀번호',
+              suffixIcon: IconButton(
+                onPressed: () => setState(() => _obscure = !_obscure),
+                icon: Icon(
+                  _obscure
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                  size: 20,
+                ),
+                tooltip: _obscure ? '비밀번호 표시' : '비밀번호 숨기기',
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          InkWell(
+            onTap: _busy ? null : () => setState(() => _remember = !_remember),
+            child: Row(
+              children: [
+                Checkbox(
+                  value: _remember,
+                  onChanged: _busy
+                      ? null
+                      : (value) => setState(() => _remember = value ?? false),
+                ),
+                const Expanded(child: Text('이 공유기 비밀번호를 보안 저장소에 기억')),
+              ],
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: _busy ? null : () => Navigator.of(context).pop(),
+                child: const Text('취소'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: _busy ? null : _login,
+                child: _busy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('로그인'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

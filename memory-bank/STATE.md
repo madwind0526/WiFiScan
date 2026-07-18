@@ -2,10 +2,10 @@
 
 ## Current Wave
 
-- **Wave:** 21
+- **Wave:** 22
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-17 Wave 21 MAC 기준 사용자 지정 장비 이름·소유 상태 영구 저장(DeviceLabelRepository)과 상세 편집 UI 추가, analyze/56 tests 통과. GitHub origin 연결 및 push 완료
+- **Last Checkpoint:** 2026-07-18 Wave 22 읽기 전용 ipTIME 공유기 커넥터(라이브 A6004NS-M 검증), .env 지원, 공유기별 보안 자격증명 저장소, GW 노드 클릭 로그인 팝업+DHCP 호스트네임 오버레이 구현. analyze/69 tests 통과, push 완료
 
 ## Wave History
 
@@ -33,6 +33,7 @@
 | 19 | Wi-Fi 전환 직후 DHCP 경쟁으로 인한 0장비 스캔 실패 수정 | Done |
 | 20 | 오프라인 OUI 제조사 사전으로 조용한 장비 MAC 제조사 식별 | Done |
 | 21 | MAC 기준 사용자 지정 장비 이름·소유 상태 영구 저장과 편집 UI | Done |
+| 22 | 읽기 전용 ipTIME 커넥터·공유기별 자격증명·GW 클릭 로그인 팝업·DHCP 호스트네임 | Done |
 
 ## Session Notes
 

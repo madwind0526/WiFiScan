@@ -12,6 +12,8 @@ import 'package:wifi_scan/features/network_profiles/application/network_profile_
 import 'package:wifi_scan/features/network_profiles/domain/network_profile.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_backup_codec.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_transfer_file_service.dart';
+import 'package:wifi_scan/features/discovery/domain/router_dhcp_client.dart';
+import 'package:wifi_scan/features/discovery/infrastructure/router_credential_store.dart';
 
 void main() {
   testWidgets('shows the network security dashboard', (tester) async {
@@ -34,6 +36,7 @@ void main() {
         discoveryService: const _FakeDiscoveryService(),
         inventoryRepository: InventoryRepository(store: _MemorySnapshotStore()),
         connectionService: const _FakeConnectionService(),
+        routerCredentialStore: _FakeRouterCredentialStore(),
       ),
     );
 
@@ -66,11 +69,12 @@ void main() {
     expect(find.text('MAC 주소'), findsOneWidget);
     await tester.tap(find.byTooltip('닫기'));
     await tester.pumpAndSettle();
+    // Tapping a gateway node opens the read-only router login popup.
     await tester.tap(find.text('GW'));
     await tester.pumpAndSettle();
-    expect(find.text('A6004NS-M'), findsOneWidget);
-    expect(find.textContaining('HTTP 80/tcp'), findsOneWidget);
-    await tester.tap(find.byTooltip('닫기'));
+    expect(find.text('공유기 관리자 로그인'), findsOneWidget);
+    expect(find.widgetWithText(TextField, '관리자 비밀번호'), findsOneWidget);
+    await tester.tap(find.text('취소'));
     await tester.pumpAndSettle();
     final searchField = find.byWidgetPredicate(
       (widget) => widget is TextField && widget.decoration?.hintText == '장비 검색',
@@ -551,6 +555,17 @@ class _FakeConnectionService implements NetworkConnectionService {
 
   @override
   Future<void> restore(String? ssid) async {}
+}
+
+class _FakeRouterCredentialStore implements RouterCredentialStore {
+  @override
+  Future<RouterCredentials?> read(String host) async => null;
+
+  @override
+  Future<void> write(RouterCredentials credentials) async {}
+
+  @override
+  Future<void> delete(String host) async {}
 }
 
 class _MemorySnapshotStore implements InventorySnapshotStore {

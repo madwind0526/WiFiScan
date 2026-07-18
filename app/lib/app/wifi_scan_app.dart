@@ -3,6 +3,7 @@ import 'package:wifi_scan/features/discovery/application/network_discovery_servi
 import 'package:wifi_scan/features/dashboard/presentation/security_dashboard_page.dart';
 import 'package:wifi_scan/features/inventory/application/inventory_repository.dart';
 import 'package:wifi_scan/features/network_profiles/application/network_connection_service.dart';
+import 'package:wifi_scan/features/discovery/infrastructure/router_credential_store.dart';
 import 'package:wifi_scan/features/network_profiles/application/network_profile_repository.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_backup_codec.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_transfer_file_service.dart';
@@ -16,6 +17,7 @@ class WifiScanApp extends StatefulWidget {
     this.profileRepository,
     this.profileBackupCodec,
     this.profileTransferFileService,
+    this.routerCredentialStore,
   });
 
   final NetworkDiscoveryService? discoveryService;
@@ -24,6 +26,7 @@ class WifiScanApp extends StatefulWidget {
   final NetworkProfileRepository? profileRepository;
   final ProfileBackupCodec? profileBackupCodec;
   final ProfileTransferFileService? profileTransferFileService;
+  final RouterCredentialStore? routerCredentialStore;
 
   @override
   State<WifiScanApp> createState() => _WifiScanAppState();
@@ -74,6 +77,7 @@ class _WifiScanAppState extends State<WifiScanApp> {
         profileRepository: widget.profileRepository,
         profileBackupCodec: widget.profileBackupCodec,
         profileTransferFileService: widget.profileTransferFileService,
+        routerCredentialStore: widget.routerCredentialStore,
         onThemeModeChanged: (mode) => setState(() => _themeMode = mode),
       ),
     );
