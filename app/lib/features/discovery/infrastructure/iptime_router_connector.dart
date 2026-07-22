@@ -45,6 +45,7 @@ class IptimeRouterConnector {
         .join('&');
 
     final HttpClientResponse response;
+    final String responseBody;
     try {
       final request = await _client.postUrl(uri).timeout(timeout);
       request.followRedirects = false;
@@ -52,21 +53,46 @@ class IptimeRouterConnector {
         HttpHeaders.contentTypeHeader,
         'application/x-www-form-urlencoded',
       );
-      request.headers.set(HttpHeaders.refererHeader, 'http://${credentials.host}/');
+      // Match the browser's Referer (the login form page) — ipTIME checks it.
+      request.headers.set(
+        HttpHeaders.refererHeader,
+        'http://${credentials.host}/sess-bin/login_session.cgi',
+      );
       request.write(body);
       response = await request.close().timeout(timeout);
+      responseBody = await response.transform(latin1.decoder).join();
     } on Exception catch (_) {
       throw const RouterQueryException('공유기에 연결하지 못했습니다. 주소와 연결 상태를 확인하세요.');
     }
 
-    final session = _sessionCookie(response);
-    await response.drain<void>();
+    // On failure ipTIME bounces back to the login page (no session set);
+    // success redirects elsewhere and sets an efm_session_id cookie.
+    if (responseBody.contains('login_session') ||
+        responseBody.contains('noauto')) {
+      throw const RouterQueryException(
+        '공유기 로그인에 실패했습니다. 관리자 아이디·비밀번호를 확인하세요. '
+        '여러 번 실패하면 공유기가 캡차를 요구할 수 있습니다.',
+      );
+    }
+    final session = _sessionFromHeaders(response) ?? _sessionCookie(response);
     if (session == null || session.isEmpty) {
       throw const RouterQueryException(
-        '공유기 로그인에 실패했습니다. 관리자 아이디와 비밀번호를 확인하세요.',
+        '로그인은 되었지만 세션 정보를 읽지 못했습니다. 잠시 후 다시 시도하세요.',
       );
     }
     return session;
+  }
+
+  /// Extracts `efm_session_id` directly from the raw Set-Cookie header, which
+  /// is more tolerant of the router's non-standard HTTP than [
+  /// HttpClientResponse.cookies].
+  static String? _sessionFromHeaders(HttpClientResponse response) {
+    final raw = response.headers[HttpHeaders.setCookieHeader];
+    if (raw == null) return null;
+    final match = RegExp(
+      r'efm_session_id=([^;\s]+)',
+    ).firstMatch(raw.join('; '));
+    return match?.group(1);
   }
 
   /// Fetches an admin page under `timepro.cgi` with an active [session].
