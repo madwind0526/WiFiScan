@@ -12,6 +12,7 @@ import 'package:wifi_scan/features/inventory/domain/network_device.dart';
 import 'package:wifi_scan/features/inventory/application/inventory_repository.dart';
 import 'package:wifi_scan/features/inventory/application/device_label_repository.dart';
 import 'package:wifi_scan/features/discovery/domain/router_dhcp_client.dart';
+import 'package:wifi_scan/features/discovery/domain/oui_vendor_directory.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/iptime_router_connector.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/router_credential_store.dart';
 import 'package:wifi_scan/features/security/domain/security_finding.dart';
@@ -90,9 +91,10 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   // Devices as discovered, before user labels are overlaid; kept so labels can
   // be re-applied in place after an edit without rescanning.
   List<NetworkDevice> _rawDevices = const [];
-  // Hostnames read from a router's DHCP list, keyed by normalized MAC. Overlaid
-  // onto matching devices whose name is still auto-derived.
-  final Map<String, String> _dhcpHostnames = {};
+  // DHCP clients read from a router, keyed by normalized MAC. Hostnames are
+  // overlaid onto matching scanned devices; entries the scan never found are
+  // added as extra "router-known" devices.
+  final Map<String, RouterDhcpClient> _routerClients = {};
   DiscoveryResult? _lastResult;
   DiscoveryProgress? _progress;
   DiscoveryCancellationToken? _cancellationToken;
@@ -1691,19 +1693,31 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   }
 
   // Overlays, in precedence order, DHCP hostnames then user labels onto the
-  // raw discovered devices. A user label always wins; a DHCP hostname replaces
-  // only an auto-derived name.
+  // raw discovered devices, then appends router-known devices the scan never
+  // found. A user label always wins; a DHCP hostname replaces only an
+  // auto-derived name.
   List<NetworkDevice> _composeDevices(Iterable<NetworkDevice> raw) {
-    return [
+    final devices = [
       for (final device in raw)
         _deviceLabelRepository.apply(_applyDhcpHostname(device)),
     ];
+    final knownMacs = {
+      for (final device in raw)
+        if (device.macAddress != null) device.macAddress!,
+    };
+    for (final entry in _routerClients.entries) {
+      if (knownMacs.contains(entry.key)) continue;
+      devices.add(
+        _deviceLabelRepository.apply(_routerKnownDevice(entry.value)),
+      );
+    }
+    return devices;
   }
 
   NetworkDevice _applyDhcpHostname(NetworkDevice device) {
     final mac = device.macAddress;
     if (mac == null) return device;
-    final hostname = _dhcpHostnames[mac];
+    final hostname = _routerClients[mac]?.hostname;
     if (hostname == null || hostname.isEmpty) return device;
     final isAutoName =
         device.displayName == '확인되지 않은 장비' ||
@@ -1712,6 +1726,33 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     return device.copyWith(
       displayName: isAutoName ? hostname : device.displayName,
       hostnames: {...device.hostnames, hostname}.toList(),
+    );
+  }
+
+  // A device the router's DHCP table knows about but the local scan did not
+  // reach (asleep, firewalled, or on another band). Marked lower-confidence
+  // and sourced from the router.
+  NetworkDevice _routerKnownDevice(RouterDhcpClient client) {
+    final mac = client.normalizedMac;
+    final now = DateTime.now();
+    final hostname = client.hostname;
+    return NetworkDevice(
+      id: 'dhcp:${mac ?? client.ipAddress}',
+      displayName: (hostname != null && hostname.isNotEmpty)
+          ? hostname
+          : (mac ?? client.ipAddress),
+      category: DeviceCategory.unknown,
+      ownershipStatus: OwnershipStatus.unconfirmed,
+      ipAddresses: [client.ipAddress],
+      sources: const [DiscoverySource.router],
+      firstSeenAt: now,
+      lastSeenAt: now,
+      identityConfidence: 0.7,
+      macAddress: mac,
+      vendor: const OuiVendorDirectory().vendorFor(mac),
+      hostnames: (hostname != null && hostname.isNotEmpty)
+          ? [hostname]
+          : const [],
     );
   }
 
@@ -1801,20 +1842,15 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   }
 
   void _applyDhcpClients(String host, List<RouterDhcpClient> clients) {
-    var applied = 0;
     for (final client in clients) {
       final mac = client.normalizedMac;
-      final hostname = client.hostname;
-      if (mac != null && hostname != null && hostname.isNotEmpty) {
-        _dhcpHostnames[mac] = hostname;
-        applied++;
-      }
+      if (mac != null) _routerClients[mac] = client;
     }
     setState(() {
       _overview = _rebuiltOverview();
       _message = clients.isEmpty
           ? '$host 로그인에 성공했지만 DHCP 목록을 찾지 못했습니다.'
-          : '$host에서 장비 $applied개의 이름을 가져왔습니다.';
+          : '$host 공유기에서 접속 장비 ${clients.length}개를 확인했습니다.';
       _messageIsError = false;
     });
   }
