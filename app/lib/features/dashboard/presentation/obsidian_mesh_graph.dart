@@ -154,6 +154,7 @@ class ObsidianMeshGraph extends StatefulWidget {
     required this.onDeviceTap,
     this.gateway,
     this.clusters,
+    this.offlineDeviceIds = const {},
     this.framed = true,
   });
 
@@ -162,6 +163,9 @@ class ObsidianMeshGraph extends StatefulWidget {
   final ValueChanged<NetworkDevice> onDeviceTap;
   final String? gateway;
   final List<MeshGraphCluster>? clusters;
+  // Ids of devices known to the router but not seen in its latest read
+  // (disconnected); rendered in a muted color instead of hidden.
+  final Set<String> offlineDeviceIds;
   final bool framed;
 
   @override
@@ -372,6 +376,9 @@ class _ObsidianMeshGraphState extends State<ObsidianMeshGraph> {
                             key: ValueKey('mesh-node-${device.id}'),
                             device: device,
                             isHub: graph.hubIds.contains(device.id),
+                            isOffline: widget.offlineDeviceIds.contains(
+                              device.id,
+                            ),
                             isFocused: focusedId == device.id,
                             isRelated:
                                 focusedId == null ||
@@ -607,6 +614,7 @@ class _ObsidianGraphNode extends StatelessWidget {
     super.key,
     required this.device,
     required this.isHub,
+    required this.isOffline,
     required this.isFocused,
     required this.isRelated,
     required this.showLabel,
@@ -618,6 +626,7 @@ class _ObsidianGraphNode extends StatelessWidget {
 
   final NetworkDevice device;
   final bool isHub;
+  final bool isOffline;
   final bool isFocused;
   final bool isRelated;
   final bool showLabel;
@@ -658,7 +667,7 @@ class _ObsidianGraphNode extends StatelessWidget {
             borderRadius: BorderRadius.circular(34),
             child: AnimatedOpacity(
               duration: const Duration(milliseconds: 140),
-              opacity: isRelated ? 1 : 0.18,
+              opacity: isRelated ? (isOffline ? 0.5 : 1) : 0.18,
               child: MediaQuery.withClampedTextScaling(
                 maxScaleFactor: 1.4,
                 child: Column(
@@ -677,12 +686,15 @@ class _ObsidianGraphNode extends StatelessWidget {
                             height: diameter + (isFocused ? 6 : 0),
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: color,
+                              // Offline devices are hollow (outline only) so
+                              // they read as "ghosts" regardless of category
+                              // color; online devices are filled.
+                              color: isOffline ? Colors.transparent : color,
                               border: Border.all(
                                 color: isFocused
                                     ? Colors.white.withValues(alpha: 0.92)
                                     : color,
-                                width: isFocused ? 2.4 : 1,
+                                width: isOffline ? 2 : (isFocused ? 2.4 : 1),
                               ),
                             ),
                           ),

@@ -93,8 +93,13 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   List<NetworkDevice> _rawDevices = const [];
   // DHCP clients read from a router, keyed by normalized MAC. Hostnames are
   // overlaid onto matching scanned devices; entries the scan never found are
-  // added as extra "router-known" devices.
+  // added as extra "router-known" devices. Kept across reads so a device that
+  // later disconnects still shows (dimmed) rather than vanishing.
   final Map<String, RouterDhcpClient> _routerClients = {};
+  // Which router host last reported each MAC, and the MACs present in each
+  // host's most recent read — used to mark no-longer-present devices offline.
+  final Map<String, String> _routerClientHost = {};
+  final Map<String, Set<String>> _routerActiveMacs = {};
   DiscoveryResult? _lastResult;
   DiscoveryProgress? _progress;
   DiscoveryCancellationToken? _cancellationToken;
@@ -916,6 +921,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                   onDeviceTap: _showDeviceDetails,
                   gateway: network?.gateway,
                   clusters: _buildMeshClusters(visibleDevices),
+                  offlineDeviceIds: _offlineDeviceIds(),
                   framed: false,
                 ),
               ),
@@ -1108,6 +1114,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
           onDeviceTap: _showDeviceDetails,
           gateway: _lastResult?.context.gateway,
           clusters: _buildMeshClusters(devices),
+          offlineDeviceIds: _offlineDeviceIds(),
         ),
         _DashboardView.cards => _DeviceCardGrid(
           devices: devices,
@@ -1714,6 +1721,19 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     return devices;
   }
 
+  // Ids of router-known devices no longer present in their host's latest read.
+  // A device found by the local scan is always current, so only appended
+  // router-only devices can be offline.
+  Set<String> _offlineDeviceIds() {
+    final ids = <String>{};
+    for (final mac in _routerClients.keys) {
+      final host = _routerClientHost[mac];
+      final active = host == null ? null : _routerActiveMacs[host];
+      if (active == null || !active.contains(mac)) ids.add('dhcp:$mac');
+    }
+    return ids;
+  }
+
   NetworkDevice _applyDhcpHostname(NetworkDevice device) {
     final mac = device.macAddress;
     if (mac == null) return device;
@@ -1842,10 +1862,16 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   }
 
   void _applyDhcpClients(String host, List<RouterDhcpClient> clients) {
+    final presentMacs = <String>{};
     for (final client in clients) {
       final mac = client.normalizedMac;
-      if (mac != null) _routerClients[mac] = client;
+      if (mac != null) {
+        _routerClients[mac] = client;
+        _routerClientHost[mac] = host;
+        presentMacs.add(mac);
+      }
     }
+    _routerActiveMacs[host] = presentMacs;
     setState(() {
       _overview = _rebuiltOverview();
       _message = clients.isEmpty
@@ -3333,6 +3359,7 @@ class _MeshNetworkView extends ObsidianMeshGraph {
     required super.onDeviceTap,
     super.gateway,
     super.clusters,
+    super.offlineDeviceIds,
     super.framed,
   });
 }
