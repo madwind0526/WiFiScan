@@ -2,10 +2,10 @@
 
 ## Current Wave
 
-- **Wave:** 22
+- **Wave:** 23
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-18 Wave 22 읽기 전용 ipTIME 커넥터를 라이브 A6004NS-M로 완성: 세션은 본문 setCookie(), 요청은 Content-Length 고정(chunked 400 회피), DHCP는 lan_pcinfo_status의 m/i/h 숨김 input 파싱. 실제 로그인으로 호스트네임 5개 확인. GW 클릭 로그인 팝업+DHCP 오버레이. analyze/70 tests 통과, push 완료
+- **Last Checkpoint:** 2026-07-18 Wave 23 읽기 전용 SK 게이트웨이(GW-ME6110) 커넥터: 인앱 캡차 팝업(사용자가 캡차 입력), SHA256 로그인→MCRSESSIONID→basic_ip_list.html szIPInfo 파싱, GW 클릭 시 ipTIME/SK 자동 감지. 오프라인 노드 흐림 표시(Wave 22.5)도 포함. analyze/73 tests 통과, push 완료
 
 ## Wave History
 
@@ -34,6 +34,7 @@
 | 20 | 오프라인 OUI 제조사 사전으로 조용한 장비 MAC 제조사 식별 | Done |
 | 21 | MAC 기준 사용자 지정 장비 이름·소유 상태 영구 저장과 편집 UI | Done |
 | 22 | 읽기 전용 ipTIME 커넥터·공유기별 자격증명·GW 클릭 로그인 팝업·DHCP 호스트네임 | Done |
+| 23 | 읽기 전용 SK 게이트웨이 커넥터(인앱 캡차 팝업)·ipTIME/SK 자동 감지·오프라인 노드 표시 | Done |
 
 ## Session Notes
 

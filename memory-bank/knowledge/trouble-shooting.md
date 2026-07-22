@@ -140,3 +140,14 @@
 - 로그인: `POST /sess-bin/login_handler.cgi`, 필드 `init_status=1&captcha_on=0&username&passwd&default_passwd=&captcha_file=&captcha_code=`, Referer=`/sess-bin/login_session.cgi`. 로그인 폼 페이지는 gzip 강제라 `Accept-Encoding: gzip` 필요(Dart autoUncompress 기본 처리). 실패 시 본문이 `login_session.cgi?noauto=1`로 되돌림.
 - DHCP 목록: `GET /sess-bin/timepro.cgi?tmenu=iframe&smenu=lan_pcinfo_status`(중첩 iframe), Referer=`...smenu=lan_pcinfo`, 쿠키 `efm_session_id`. 데이터는 인덱스별 숨김 input `name=m<N>`(MAC)/`i<N>`(IP)/`h<N>`(호스트네임). 반복 로그인은 캡차를 유발할 수 있음.
 - 검증: 실제 로그인으로 호스트네임 5개(madwind99, Samsung, hyojeong-ui-Z-Flip7, SM-L505N 등) 조회. 파서 단위 테스트 + 전체 70 tests 통과.
+
+## SK 브로드밴드 게이트웨이(GW-ME6110) 읽기 전용 커넥터
+
+- 확인일: 2026-07-18 (라이브 192.168.45.1, 펌웨어 1.10.00, Mercury Inc.)
+- 구조: ipTIME과 완전히 다른 .asp 기반 + 상시 캡차 + 클라이언트 SHA256 해싱.
+- 로그인: `POST /goform/mcr_verifyLoginPasswd`, 필드 `id`/`passwd`/`captchatext`. `c = captcha.toLowerCase()`일 때 `id=sha256(userid)`, `passwd=sha256(c+sha256(pw)+c)`, `captchatext=sha256(c*4)` (모두 소문자 hex). 실패 시 본문에 "맞지 않습니다" 또는 start.asp 리다이렉트.
+- 캡차: `GET /captcha.png` (280x70 PNG, 쿠키 없이 소스 IP 기준 세션에 바인딩). `--compressed`(gzip) 필요. 사용자가 직접 읽어 입력해야 하며 특수문자(예: `?`) 포함 가능. AI가 캡차를 자동 판독해 로그인하는 것은 시스템 classifier가 차단함 → 인앱에서 사용자가 입력하는 방식만 사용.
+- 세션: 로그인 성공 시 `MCRSESSIONID` 쿠키 설정(실패 시 미설정). 이후 요청에 이 쿠키 필요. URL 토큰(main.html?<n>)만으로는 인증 안 됨.
+- 요청 본문은 Content-Length 고정 필요(HTTP/1.0, chunked 거부).
+- 장비 목록: `GET /asp/basic_ip_list.html` (Referer `/asp/home.html`) → `szIPInfo` 문자열 파싱. 형식 `ip,mac,hostname,port` 엔트리를 `;`로 구분. 호스트네임 예: BID-AT200/IPTV/STB, Samsung-Refrigerator, Samsung-Jet-Bot-Vacuum-Cleaner 등 21개.
+- 리버스 시 라이브 캡처 방법: 사용자가 브라우저로 로그인 후 F12 → Application → Cookies에서 MCRSESSIONID를 제공하면, 그 쿠키로 인증된 페이지를 읽어 구조 파악 가능(내 shell은 자동 로그인이 차단되므로).

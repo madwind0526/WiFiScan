@@ -1,5 +1,7 @@
+import 'dart:convert' show latin1;
 import 'dart:io' as io;
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -14,6 +16,7 @@ import 'package:wifi_scan/features/inventory/application/device_label_repository
 import 'package:wifi_scan/features/discovery/domain/router_dhcp_client.dart';
 import 'package:wifi_scan/features/discovery/domain/oui_vendor_directory.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/iptime_router_connector.dart';
+import 'package:wifi_scan/features/discovery/infrastructure/sk_gateway_connector.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/router_credential_store.dart';
 import 'package:wifi_scan/features/security/domain/security_finding.dart';
 import 'package:wifi_scan/features/discovery/domain/network_context.dart';
@@ -1530,7 +1533,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   Future<void> _showDeviceDetails(NetworkDevice device) async {
     final gatewayHost = _gatewayHostFor(device);
     if (gatewayHost != null) {
-      await _showRouterLogin(gatewayHost);
+      await _openRouterAdmin(gatewayHost);
       return;
     }
     await showDialog<void>(
@@ -1798,6 +1801,60 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       if (gateways.contains(ip)) return ip;
     }
     return null;
+  }
+
+  // Routes a gateway tap to the right login flow. SK Broadband gateways use a
+  // captcha and a different login/data format than ipTIME, so they get their
+  // own popup; everything else uses the ipTIME connector.
+  Future<void> _openRouterAdmin(String host) async {
+    final isSk = await _isSkGateway(host);
+    if (!mounted) return;
+    if (isSk) {
+      await _showSkLogin(host);
+    } else {
+      await _showRouterLogin(host);
+    }
+  }
+
+  Future<bool> _isSkGateway(String host) async {
+    final client = io.HttpClient()
+      ..connectionTimeout = const Duration(seconds: 5);
+    try {
+      final request = await client
+          .getUrl(Uri.parse('http://$host/'))
+          .timeout(const Duration(seconds: 5));
+      final response = await request.close().timeout(
+        const Duration(seconds: 5),
+      );
+      final body = await response.transform(latin1.decoder).join();
+      final location =
+          response.headers.value(io.HttpHeaders.locationHeader) ?? '';
+      final text = '$body $location'.toLowerCase();
+      return text.contains('start.asp') ||
+          text.contains('captchalogin') ||
+          text.contains('mcr_verifyloginpasswd') ||
+          text.contains('/asp/');
+    } catch (_) {
+      return false;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<void> _showSkLogin(String host) async {
+    final saved = await _routerCredentialStore.read(host);
+    if (!mounted) return;
+    final result = await showDialog<List<RouterDhcpClient>>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (dialogContext) => _SkLoginDialog(
+        host: host,
+        saved: saved,
+        credentialStore: _routerCredentialStore,
+      ),
+    );
+    if (result == null || !mounted) return;
+    _applyDhcpClients(host, result);
   }
 
   Future<void> _showRouterLogin(String host) async {
@@ -2135,6 +2192,231 @@ class _DeviceLabelEditorDialogState extends State<_DeviceLabelEditorDialog> {
       label: Text(label),
       selected: _ownership == value,
       onSelected: (_) => setState(() => _ownership = value),
+    );
+  }
+}
+
+class _SkLoginDialog extends StatefulWidget {
+  const _SkLoginDialog({
+    required this.host,
+    required this.saved,
+    required this.credentialStore,
+  });
+
+  final String host;
+  final RouterCredentials? saved;
+  final RouterCredentialStore credentialStore;
+
+  @override
+  State<_SkLoginDialog> createState() => _SkLoginDialogState();
+}
+
+class _SkLoginDialogState extends State<_SkLoginDialog> {
+  late final TextEditingController _userController;
+  late final TextEditingController _passwordController;
+  final TextEditingController _captchaController = TextEditingController();
+  final SkGatewayConnector _connector = SkGatewayConnector();
+  Uint8List? _captchaImage;
+  bool _obscure = true;
+  bool _remember = true;
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _userController = TextEditingController(text: widget.saved?.username ?? '');
+    _passwordController = TextEditingController(
+      text: widget.saved?.password ?? '',
+    );
+    _remember = widget.saved != null;
+    _loadCaptcha();
+  }
+
+  @override
+  void dispose() {
+    _userController.dispose();
+    _passwordController.dispose();
+    _captchaController.dispose();
+    _connector.close();
+    super.dispose();
+  }
+
+  Future<void> _loadCaptcha() async {
+    try {
+      final image = await _connector.fetchCaptcha(widget.host);
+      if (mounted) setState(() => _captchaImage = image);
+    } catch (_) {
+      if (mounted) setState(() => _error = '캡차 이미지를 불러오지 못했습니다.');
+    }
+  }
+
+  Future<void> _login() async {
+    final user = _userController.text.trim();
+    final password = _passwordController.text;
+    final captcha = _captchaController.text.trim();
+    if (user.isEmpty || password.isEmpty || captcha.isEmpty) {
+      setState(() => _error = '아이디·비밀번호·캡차를 모두 입력하세요.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final session = await _connector.login(
+        host: widget.host,
+        username: user,
+        password: password,
+        captcha: captcha,
+      );
+      final clients = await _connector.readDevices(
+        host: widget.host,
+        session: session,
+      );
+      if (_remember) {
+        await widget.credentialStore.write(
+          RouterCredentials(host: widget.host, username: user, password: password),
+        );
+      } else {
+        await widget.credentialStore.delete(widget.host);
+      }
+      if (!mounted) return;
+      Navigator.of(context).pop(clients);
+    } on RouterQueryException catch (error) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = error.message;
+          _captchaController.clear();
+        });
+        _loadCaptcha();
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = '로그인 중 오류가 발생했습니다.';
+        });
+        _loadCaptcha();
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return _TranslucentDialog(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('공유기 관리자 로그인', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 4),
+          Text(
+            '${widget.host} · 읽기 전용으로 접속 장비 목록만 조회합니다.',
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _userController,
+            enabled: !_busy,
+            decoration: const InputDecoration(labelText: '관리자 아이디'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _passwordController,
+            enabled: !_busy,
+            obscureText: _obscure,
+            decoration: InputDecoration(
+              labelText: '관리자 비밀번호',
+              suffixIcon: IconButton(
+                onPressed: () => setState(() => _obscure = !_obscure),
+                icon: Icon(
+                  _obscure
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                  size: 20,
+                ),
+                tooltip: _obscure ? '비밀번호 표시' : '비밀번호 숨기기',
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text('아래 이미지의 문자를 입력하세요', style: Theme.of(context).textTheme.labelSmall),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Container(
+                width: 160,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: _captchaImage == null
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Image.memory(_captchaImage!, fit: BoxFit.contain),
+              ),
+              IconButton(
+                onPressed: _busy ? null : _loadCaptcha,
+                icon: const Icon(Icons.refresh),
+                tooltip: '캡차 새로 고침',
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _captchaController,
+            enabled: !_busy,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _busy ? null : _login(),
+            decoration: const InputDecoration(labelText: '자동입력방지문자'),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Checkbox(
+                value: _remember,
+                onChanged: _busy
+                    ? null
+                    : (value) => setState(() => _remember = value ?? false),
+              ),
+              const Expanded(child: Text('아이디·비밀번호를 보안 저장소에 기억 (캡차 제외)')),
+            ],
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 6),
+            Text(_error!, style: TextStyle(color: scheme.error)),
+          ],
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: _busy ? null : () => Navigator.of(context).pop(),
+                child: const Text('취소'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: _busy ? null : _login,
+                child: _busy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('로그인'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
