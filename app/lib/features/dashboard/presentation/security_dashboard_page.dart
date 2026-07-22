@@ -1742,6 +1742,12 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   Future<void> _showRouterLogin(String host) async {
     final saved = await _routerCredentialStore.read(host);
     if (!mounted) return;
+    // With saved credentials, log in automatically and skip the popup; only
+    // prompt when nothing is saved or the saved login no longer works.
+    if (saved != null && saved.isComplete) {
+      final ok = await _fetchRouterDhcp(host, saved);
+      if (ok || !mounted) return;
+    }
     final result = await showDialog<List<RouterDhcpClient>>(
       context: context,
       barrierColor: Colors.black54,
@@ -1752,8 +1758,51 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       ),
     );
     if (result == null || !mounted) return;
+    _applyDhcpClients(host, result);
+  }
+
+  /// Logs in with [credentials] and applies the DHCP hostnames without showing
+  /// the popup. Returns false (and sets an error message) so the caller can
+  /// fall back to the manual login dialog.
+  Future<bool> _fetchRouterDhcp(String host, RouterCredentials credentials) async {
+    setState(() {
+      _message = '$host 공유기에 로그인 중입니다…';
+      _messageIsError = false;
+    });
+    final connector = IptimeRouterConnector();
+    try {
+      final session = await connector.login(credentials);
+      final clients = await connector.readDhcpClients(
+        host: host,
+        session: session,
+      );
+      if (!mounted) return true;
+      _applyDhcpClients(host, clients);
+      return true;
+    } on RouterQueryException catch (error) {
+      if (mounted) {
+        setState(() {
+          _message = error.message;
+          _messageIsError = true;
+        });
+      }
+      return false;
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _message = '공유기 로그인 중 오류가 발생했습니다.';
+          _messageIsError = true;
+        });
+      }
+      return false;
+    } finally {
+      connector.close();
+    }
+  }
+
+  void _applyDhcpClients(String host, List<RouterDhcpClient> clients) {
     var applied = 0;
-    for (final client in result) {
+    for (final client in clients) {
       final mac = client.normalizedMac;
       final hostname = client.hostname;
       if (mac != null && hostname != null && hostname.isNotEmpty) {
@@ -1763,7 +1812,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     }
     setState(() {
       _overview = _rebuiltOverview();
-      _message = result.isEmpty
+      _message = clients.isEmpty
           ? '$host 로그인에 성공했지만 DHCP 목록을 찾지 못했습니다.'
           : '$host에서 장비 $applied개의 이름을 가져왔습니다.';
       _messageIsError = false;
