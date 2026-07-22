@@ -130,3 +130,13 @@
 - 원인: `netsh wlan connect`는 SSID 연결(association)까지만 확인하고 반환하는데, DHCP 주소 할당은 그 뒤 몇 초가 더 걸린다. 그 사이 `Get-NetIPConfiguration`은 Wi-Fi 어댑터에 유효한 사설 IPv4가 없다고 보고하고(APIPA 169.254.*는 필터됨), 탐색이 "활성 Wi-Fi 연결을 찾지 못했습니다"로 즉시 실패했다.
 - 해결: `WindowsNetworkDiscoveryService._readPrimaryNetworkContext`를 재시도 루프로 감쌌다(`contextReadAttempts` 기본 7회 × `contextRetryDelay` 1.5초 ≈ 최대 10.5초). 재시도 사이에 취소 토큰을 확인한다.
 - 검증: flutter analyze 통과, 실제 Windows 라이브 스캔 통합 테스트 포함 41개 테스트 전체 통과.
+
+## ipTIME(A6004NS-M) 읽기 전용 커넥터 — 실제 로그인/DHCP 흐름
+
+- 확인일: 2026-07-18 (라이브 A6004NS-M, 펌웨어 12.07.8)
+- 증상: Dart 커넥터 로그인이 "로그인은 되었지만 세션 정보를 읽지 못했습니다"로 실패. 브라우저·curl 로그인은 정상.
+- 원인 1 (400): Dart HttpClient가 POST 본문을 chunked 전송으로 보내는데 공유기의 `Httpd/1.0` 서버가 chunked를 거부하고 `400 Bad Request` 반환. → `request.contentLength = bodyBytes.length; request.add(bodyBytes);`로 Content-Length 고정.
+- 원인 2 (세션): 이 공유기는 세션을 Set-Cookie 헤더가 아니라 응답 본문의 JS `setCookie('<16자 영숫자>')`로 전달(브라우저가 실행해 `efm_session_id` 쿠키 설정). → 본문에서 `setCookie\('([^']+)'\)` 정규식으로 추출.
+- 로그인: `POST /sess-bin/login_handler.cgi`, 필드 `init_status=1&captcha_on=0&username&passwd&default_passwd=&captcha_file=&captcha_code=`, Referer=`/sess-bin/login_session.cgi`. 로그인 폼 페이지는 gzip 강제라 `Accept-Encoding: gzip` 필요(Dart autoUncompress 기본 처리). 실패 시 본문이 `login_session.cgi?noauto=1`로 되돌림.
+- DHCP 목록: `GET /sess-bin/timepro.cgi?tmenu=iframe&smenu=lan_pcinfo_status`(중첩 iframe), Referer=`...smenu=lan_pcinfo`, 쿠키 `efm_session_id`. 데이터는 인덱스별 숨김 input `name=m<N>`(MAC)/`i<N>`(IP)/`h<N>`(호스트네임). 반복 로그인은 캡차를 유발할 수 있음.
+- 검증: 실제 로그인으로 호스트네임 5개(madwind99, Samsung, hyojeong-ui-Z-Flip7, SM-L505N 등) 조회. 파서 단위 테스트 + 전체 70 tests 통과.

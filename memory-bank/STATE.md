@@ -5,7 +5,7 @@
 - **Wave:** 22
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-18 Wave 22 읽기 전용 ipTIME 공유기 커넥터(라이브 A6004NS-M 검증), .env 지원, 공유기별 보안 자격증명 저장소, GW 노드 클릭 로그인 팝업+DHCP 호스트네임 오버레이 구현. analyze/69 tests 통과, push 완료
+- **Last Checkpoint:** 2026-07-18 Wave 22 읽기 전용 ipTIME 커넥터를 라이브 A6004NS-M로 완성: 세션은 본문 setCookie(), 요청은 Content-Length 고정(chunked 400 회피), DHCP는 lan_pcinfo_status의 m/i/h 숨김 input 파싱. 실제 로그인으로 호스트네임 5개 확인. GW 클릭 로그인 팝업+DHCP 오버레이. analyze/70 tests 통과, push 완료
 
 ## Wave History
 

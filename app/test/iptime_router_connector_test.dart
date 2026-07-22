@@ -95,5 +95,21 @@ void main() {
       const body = '<tr><td>192.168.0.30</td><td>no-mac-here</td></tr>';
       expect(IptimeRouterConnector.parseDhcpClients(body), isEmpty);
     });
+
+    test('parses the A6004NS-M hidden-input lease format', () {
+      const body = '''
+        <input type=hidden name=m0 value="88:36:6C:C1:D6:84">
+        <input type=hidden name=i0 value="192.168.0.10">
+        <input type=hidden name=h0 value="madwind99">
+        <input type=hidden name=m1 value="A0:0B:BA:11:22:33">
+        <input type=hidden name=i1 value="192.168.0.11">
+        <input type=hidden name=h1 value="hyojeong-ui-Z-Flip7">
+      ''';
+      final clients = IptimeRouterConnector.parseDhcpClients(body);
+      expect(clients.length, 2);
+      final phone = clients.firstWhere((c) => c.ipAddress == '192.168.0.11');
+      expect(phone.normalizedMac, 'A0:0B:BA:11:22:33');
+      expect(phone.hostname, 'hyojeong-ui-Z-Flip7');
+    });
   });
 }

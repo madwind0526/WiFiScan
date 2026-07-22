@@ -43,6 +43,7 @@ class IptimeRouterConnector {
               '${Uri.encodeQueryComponent(e.key)}=${Uri.encodeQueryComponent(e.value)}',
         )
         .join('&');
+    final bodyBytes = utf8.encode(body);
 
     final HttpClientResponse response;
     final String responseBody;
@@ -58,15 +59,22 @@ class IptimeRouterConnector {
         HttpHeaders.refererHeader,
         'http://${credentials.host}/sess-bin/login_session.cgi',
       );
-      request.write(body);
+      // The router's HTTP/1.0 server rejects chunked bodies (400), so send a
+      // fixed Content-Length instead of streaming.
+      request.contentLength = bodyBytes.length;
+      request.add(bodyBytes);
       response = await request.close().timeout(timeout);
       responseBody = await response.transform(latin1.decoder).join();
     } on Exception catch (_) {
       throw const RouterQueryException('공유기에 연결하지 못했습니다. 주소와 연결 상태를 확인하세요.');
     }
 
-    // On failure ipTIME bounces back to the login page (no session set);
-    // success redirects elsewhere and sets an efm_session_id cookie.
+    // ipTIME delivers the session in the response BODY as a JavaScript
+    // `setCookie('<id>')` call (the browser runs it to set efm_session_id),
+    // not as a Set-Cookie header. On failure the body bounces back to the
+    // login page instead.
+    final session = _sessionFromBody(responseBody);
+    if (session != null) return session;
     if (responseBody.contains('login_session') ||
         responseBody.contains('noauto')) {
       throw const RouterQueryException(
@@ -74,18 +82,23 @@ class IptimeRouterConnector {
         '여러 번 실패하면 공유기가 캡차를 요구할 수 있습니다.',
       );
     }
-    final session = _sessionFromHeaders(response) ?? _sessionCookie(response);
-    if (session == null || session.isEmpty) {
-      throw const RouterQueryException(
-        '로그인은 되었지만 세션 정보를 읽지 못했습니다. 잠시 후 다시 시도하세요.',
-      );
-    }
-    return session;
+    // Fall back to header/cookie parsing for other firmwares.
+    final headerSession = _sessionFromHeaders(response) ?? _sessionCookie(response);
+    if (headerSession != null && headerSession.isNotEmpty) return headerSession;
+    throw const RouterQueryException(
+      '로그인은 되었지만 세션 정보를 읽지 못했습니다. 잠시 후 다시 시도하세요.',
+    );
   }
 
-  /// Extracts `efm_session_id` directly from the raw Set-Cookie header, which
-  /// is more tolerant of the router's non-standard HTTP than [
-  /// HttpClientResponse.cookies].
+  /// Extracts the session id from ipTIME's `setCookie('<id>')` script body.
+  static String? _sessionFromBody(String body) {
+    final match = RegExp(r"setCookie\('([^']+)'\)").firstMatch(body);
+    final id = match?.group(1);
+    return (id != null && id.isNotEmpty) ? id : null;
+  }
+
+  /// Extracts `efm_session_id` directly from the raw Set-Cookie header (for
+  /// firmwares that use a header instead of the script body).
   static String? _sessionFromHeaders(HttpClientResponse response) {
     final raw = response.headers[HttpHeaders.setCookieHeader];
     if (raw == null) return null;
@@ -106,6 +119,7 @@ class IptimeRouterConnector {
     required String tmenu,
     required String smenu,
     Map<String, String> extra = const {},
+    String? referer,
   }) async {
     final query = {'tmenu': tmenu, 'smenu': smenu, ...extra};
     final uri = Uri.parse(
@@ -115,7 +129,10 @@ class IptimeRouterConnector {
       final request = await _client.getUrl(uri).timeout(timeout);
       request.followRedirects = false;
       request.headers.set(HttpHeaders.cookieHeader, 'efm_session_id=$session');
-      request.headers.set(HttpHeaders.refererHeader, 'http://$host/');
+      request.headers.set(
+        HttpHeaders.refererHeader,
+        referer ?? 'http://$host/',
+      );
       final response = await request.close().timeout(timeout);
       final text = await response.transform(latin1.decoder).join();
       if (text.contains('login_session') || text.contains('session_timeout')) {
@@ -129,14 +146,13 @@ class IptimeRouterConnector {
     }
   }
 
-  /// Endpoints under `timepro.cgi` that ipTIME firmwares expose the DHCP /
-  /// connected-device list on. Tried in order until one yields entries, since
-  /// the exact page varies by firmware.
+  /// Pages that hold the DHCP / connected-device list, most-specific first.
+  /// A6004NS-M serves it from the `lan_pcinfo_status` iframe; the rest are
+  /// fallbacks for other firmwares.
   static const List<(String, String)> dhcpPageCandidates = [
+    ('iframe', 'lan_pcinfo_status'),
     ('netconf', 'lansetup'),
     ('netconf', 'dhcpserverset'),
-    ('netconf', 'dhcpsummary'),
-    ('iframe', 'internetstatus'),
   ];
 
   /// Reads the router's DHCP client list with an active [session].
@@ -147,6 +163,9 @@ class IptimeRouterConnector {
     required String host,
     required String session,
   }) async {
+    // The status iframe expects the pc-info page as its referer.
+    final referer =
+        'http://$host/sess-bin/timepro.cgi?tmenu=iframe&smenu=lan_pcinfo';
     for (final (tmenu, smenu) in dhcpPageCandidates) {
       try {
         final body = await fetchAdminPage(
@@ -154,6 +173,7 @@ class IptimeRouterConnector {
           session: session,
           tmenu: tmenu,
           smenu: smenu,
+          referer: referer,
         );
         final clients = parseDhcpClients(body);
         if (clients.isNotEmpty) return clients;
@@ -171,13 +191,22 @@ class IptimeRouterConnector {
     r'\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b',
   );
 
+  // A6004NS-M stores each lease as hidden inputs `m<N>`/`i<N>`/`h<N>`
+  // (MAC/IP/hostname), e.g. `<input type=hidden name=m0 value="AA:...">`.
+  static final _leaseField = RegExp(
+    r'name=["' "'" r']?([mih])(\d+)["' "'" r']?\s+value="([^"]*)"',
+    caseSensitive: false,
+  );
+
   /// Extracts DHCP client rows from an ipTIME admin page.
   ///
-  /// Firmware differs (HTML tables vs JavaScript arrays vs delimited strings),
-  /// so this splits the body into records and keeps any record carrying both
-  /// an IPv4 and a MAC, treating the leftover text as the hostname. This is
-  /// format-agnostic within ipTIME's page shapes.
+  /// Prefers the A6004NS-M hidden-input triplet format; otherwise falls back
+  /// to a format-agnostic scan that keeps any record carrying both an IPv4 and
+  /// a MAC (HTML tables, JS arrays, delimited strings).
   static List<RouterDhcpClient> parseDhcpClients(String body) {
+    final triplets = _parseLeaseFields(body);
+    if (triplets.isNotEmpty) return triplets;
+
     final records = body.split(RegExp(r'</tr>|;|\n', caseSensitive: false));
     final byIp = <String, RouterDhcpClient>{};
     for (final record in records) {
@@ -195,6 +224,39 @@ class IptimeRouterConnector {
         ipAddress: ip,
         macAddress: mac,
         hostname: hostname,
+      );
+    }
+    return byIp.values.toList(growable: false);
+  }
+
+  static List<RouterDhcpClient> _parseLeaseFields(String body) {
+    final macByIdx = <String, String>{};
+    final ipByIdx = <String, String>{};
+    final hostByIdx = <String, String>{};
+    for (final match in _leaseField.allMatches(body)) {
+      final field = match.group(1)!.toLowerCase();
+      final index = match.group(2)!;
+      final value = match.group(3)!.trim();
+      if (value.isEmpty) continue;
+      switch (field) {
+        case 'm':
+          macByIdx[index] = value;
+        case 'i':
+          ipByIdx[index] = value;
+        case 'h':
+          hostByIdx[index] = value;
+      }
+    }
+    final byIp = <String, RouterDhcpClient>{};
+    for (final index in macByIdx.keys) {
+      final mac = macByIdx[index];
+      final ip = ipByIdx[index];
+      if (mac == null || ip == null || !_isUsableIpv4(ip)) continue;
+      final host = hostByIdx[index];
+      byIp[ip] = RouterDhcpClient(
+        ipAddress: ip,
+        macAddress: mac,
+        hostname: (host == null || host.isEmpty) ? null : host,
       );
     }
     return byIp.values.toList(growable: false);
