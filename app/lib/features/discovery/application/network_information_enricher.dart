@@ -1,5 +1,6 @@
 import 'package:wifi_scan/features/discovery/application/network_discovery_service.dart';
 import 'package:wifi_scan/features/discovery/domain/discovery_result.dart';
+import 'package:wifi_scan/features/discovery/domain/device_category_classifier.dart';
 import 'package:wifi_scan/features/discovery/domain/oui_vendor_directory.dart';
 import 'package:wifi_scan/features/inventory/domain/network_device.dart';
 
@@ -176,97 +177,8 @@ class NetworkInformationEnricher {
 
   NetworkDevice _classifyDevice(NetworkDevice device) {
     if (device.category != DeviceCategory.unknown) return device;
-    final category = _inferCategory(device);
+    final category = inferDeviceCategory(device);
     return category == null ? device : device.copyWith(category: category);
-  }
-
-  DeviceCategory? _inferCategory(NetworkDevice device) {
-    final evidence = [
-      device.displayName,
-      device.vendor ?? '',
-      device.modelName ?? '',
-      device.description ?? '',
-      ...device.hostnames,
-      ...device.services.map((service) => service.protocol),
-      ...device.services.map((service) => service.product ?? ''),
-    ].join(' ').toLowerCase().replaceAll('_', '-');
-
-    bool containsAny(List<String> values) {
-      return values.any(evidence.contains);
-    }
-
-    if (containsAny(const ['router', 'gateway', 'iptime', 'a6004ns'])) {
-      return DeviceCategory.router;
-    }
-    if (containsAny(const [
-      'bid-at',
-      'smart tv',
-      'smarttv',
-      'androidtv',
-      'googlecast',
-      'chromecast',
-      'webos',
-      'bravia',
-      'tizen',
-      'roku',
-      'apple tv',
-      'appletv',
-      'set-top',
-      'settop',
-      'mediarenderer',
-    ])) {
-      return DeviceCategory.television;
-    }
-    if (containsAny(const ['printer', ' ipp ', 'airprint'])) {
-      return DeviceCategory.printer;
-    }
-    if (containsAny(const ['camera', 'webcam', ' rtsp'])) {
-      return DeviceCategory.camera;
-    }
-    if (containsAny(const ['speaker', 'sonos', ' raop', 'spotify-connect'])) {
-      return DeviceCategory.speaker;
-    }
-    if (containsAny(const [
-      'homekit',
-      'matter',
-      'miio',
-      'ewelink',
-      'smartthings',
-      'home assistant',
-      'vacuum',
-      'air purifier',
-      'airpurifier',
-      'washer',
-      'dryer',
-      'refrigerator',
-    ])) {
-      return DeviceCategory.iot;
-    }
-    if (containsAny(const [
-      'iphone',
-      'ipad',
-      'galaxy',
-      'pixel',
-      ' phone',
-      'mobile',
-      'mobdev',
-    ])) {
-      return DeviceCategory.phone;
-    }
-    if (containsAny(const [
-      'windows',
-      'desktop-',
-      'laptop',
-      'macbook',
-      'imac',
-      'workstation',
-      ' smb',
-      ' rdp',
-      'netbios-ns',
-    ])) {
-      return DeviceCategory.computer;
-    }
-    return null;
   }
 }
 

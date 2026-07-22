@@ -1,5 +1,28 @@
 # Active Context
 
+## 다음 작업: RouterConnector 인터페이스 리팩터링 (사용자 승인, 미착수)
+
+목적: 공유기 로그인/조회를 "브랜드 하드코딩"에서 "캡차 유무 기준 라우팅 + 커넥터 레지스트리"로 일반화. 기능은 현재와 동일, 구조만 개선해 새 공유기 추가를 쉽게.
+
+현재 상태(리팩터 전): `_openRouterAdmin(host)`가 `_isSkGateway(host)` 브랜드 감지로 `_showSkLogin`(SK) vs `_showRouterLogin`(ipTIME) 분기. 커넥터는 `IptimeRouterConnector`, `SkGatewayConnector` 각각 별도 시그니처.
+
+단계별 계획(순서대로, 각 단계 후 analyze+test+commit 권장):
+1. `discovery/domain/router_connector.dart`에 공통 인터페이스 정의:
+   - `abstract interface class RouterConnector { String get id; bool get requiresCaptcha; Future<bool> matches(String host); Future<Uint8List>? fetchCaptcha(String host); Future<String> login({host, username, password, captcha}); Future<List<RouterDhcpClient>> readDevices({host, session}); void close(); }`
+   - captcha 없는 커넥터는 `requiresCaptcha=false`, `fetchCaptcha`는 null/미사용, `login`의 captcha 인자 무시.
+2. `IptimeRouterConnector`가 `RouterConnector` 구현하도록 조정: `requiresCaptcha=false`, `matches`는 `/`나 login 페이지에 `sess-bin`/`login_session` 표식 확인, `login` 시그니처 통일(captcha 무시), `readDevices` 유지.
+3. `SkGatewayConnector`가 `RouterConnector` 구현: `requiresCaptcha=true`, `matches`는 `start.asp`/`captchalogin`/`/asp/` 표식, `fetchCaptcha` 구현(이미 있음), `login`/`readDevices` 유지.
+4. `RouterConnectorRegistry` (또는 top-level `detectRouterConnector(host)`): 등록된 커넥터들의 `matches(host)`를 순서대로 시도해 첫 매칭 반환, 없으면 null(미지원).
+5. 대시보드 `_openRouterAdmin(host)` 재작성:
+   - `final connector = await detectRouterConnector(host);`
+   - null(미지원) → 스낵바/메시지 "이 공유기는 자동 조회를 지원하지 않습니다. 장비 상세에서 이름을 직접 지정하세요." (수동 라벨링 폴백)
+   - `connector.requiresCaptcha` true → 캡차 팝업(현재 `_SkLoginDialog`를 커넥터 주입형 `_CaptchaLoginDialog`로 일반화), false → 자동 로그인(저장 자격증명 시 팝업 skip, 현재 `_showRouterLogin` 로직) + 실패 시 팝업.
+   - 로그인 결과 `List<RouterDhcpClient>` → 기존 `_applyDhcpClients(host, result)` 재사용(공통).
+6. `_isSkGateway` 제거, `_SkLoginDialog`/`_RouterLoginDialog`를 커넥터 주입형으로 통합(캡차 유무로 UI만 분기). 자동 로그인은 `requiresCaptcha=false`일 때만.
+7. 테스트: 레지스트리 감지(모의 커넥터), 인터페이스 준수. 기존 파서/해싱 테스트 유지. widget_test의 GW 탭은 감지 실패 시 미지원 폴백 or ipTIME 경로 — fake 조정 필요할 수 있음.
+
+주의: "최신 ipTIME 캡차" 지원은 별개 작업(ipTIME 커넥터에 캡차 방식 추가; SK와 다름). 이번 리팩터 범위 밖.
+
 ## Current Focus
 
 - Wave 22에서 읽기 전용 ipTIME 공유기 커넥터를 추가했다. 라이브 A6004NS-M로 검증: Dart HttpClient가 비표준 HTTP/1.0을 처리하고, 로그인은 POST `/sess-bin/login_handler.cgi`→`efm_session_id` 쿠키, 관리 페이지는 `timepro.cgi`. 자격증명은 `.env`(DotEnv, gitignore) 또는 공유기별 보안 저장소(`SecureRouterCredentialStore`, 게이트웨이 IP 키)에서 로드하고 절대 추측하지 않는다. 메시의 GW 노드를 클릭하면 해당 게이트웨이 로그인 팝업(`_RouterLoginDialog`)이 뜨고, 로그인 성공 시 DHCP 목록을 읽어 MAC 기준으로 `_dhcpHostnames`에 저장→`_composeDevices`가 자동 이름 위에 호스트네임을 오버레이(사용자 라벨 > DHCP 호스트네임 > 자동). DHCP 파서는 여러 후보 엔드포인트+범용 IP/MAC 레코드 파싱으로 firmware 형식차를 흡수하되, 실제 페이지로 재검증 필요. 사용자 공유기 2대는 서로 다른 서브넷(192.168.0.1, 192.168.45.1)이며 둘 다 현재 위치에서 도달 가능.

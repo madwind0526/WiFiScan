@@ -15,6 +15,7 @@ import 'package:wifi_scan/features/inventory/application/inventory_repository.da
 import 'package:wifi_scan/features/inventory/application/device_label_repository.dart';
 import 'package:wifi_scan/features/discovery/domain/router_dhcp_client.dart';
 import 'package:wifi_scan/features/discovery/domain/oui_vendor_directory.dart';
+import 'package:wifi_scan/features/discovery/domain/device_category_classifier.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/iptime_router_connector.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/sk_gateway_connector.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/router_credential_store.dart';
@@ -1746,10 +1747,16 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         device.displayName == '확인되지 않은 장비' ||
         device.displayName == '임의 MAC 장비' ||
         device.displayName == device.vendor;
-    return device.copyWith(
+    var updated = device.copyWith(
       displayName: isAutoName ? hostname : device.displayName,
       hostnames: {...device.hostnames, hostname}.toList(),
     );
+    // The new hostname may now reveal the device type (e.g. "…-Refrigerator").
+    if (updated.category == DeviceCategory.unknown) {
+      final inferred = inferDeviceCategory(updated);
+      if (inferred != null) updated = updated.copyWith(category: inferred);
+    }
+    return updated;
   }
 
   // A device the router's DHCP table knows about but the local scan did not
@@ -1759,7 +1766,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     final mac = client.normalizedMac;
     final now = DateTime.now();
     final hostname = client.hostname;
-    return NetworkDevice(
+    final device = NetworkDevice(
       id: 'dhcp:${mac ?? client.ipAddress}',
       displayName: (hostname != null && hostname.isNotEmpty)
           ? hostname
@@ -1777,6 +1784,9 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
           ? [hostname]
           : const [],
     );
+    // Classify from the router-provided name (e.g. Samsung-Refrigerator → IoT).
+    final category = inferDeviceCategory(device);
+    return category == null ? device : device.copyWith(category: category);
   }
 
   NetworkOverview _rebuiltOverview() {
