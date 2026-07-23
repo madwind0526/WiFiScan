@@ -27,6 +27,8 @@ import 'package:wifi_scan/features/remediation/domain/remediation_plan.dart';
 import 'package:wifi_scan/features/network_profiles/application/network_connection_service.dart';
 import 'package:wifi_scan/features/network_profiles/application/network_profile_repository.dart';
 import 'package:wifi_scan/features/network_profiles/domain/network_profile.dart';
+import 'package:wifi_scan/features/network_profiles/domain/wifi_qr_payload.dart';
+import 'package:wifi_scan/features/network_profiles/presentation/wifi_qr_scan_page.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/platform_network_connection_service.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_backup_codec.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_transfer_file_service.dart';
@@ -770,6 +772,23 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                       label: const Text('추가'),
                     ),
                   ),
+                  // The phone cannot hand over its saved passphrases, but the
+                  // user can point the camera at the QR its Wi-Fi settings
+                  // print for one network at a time.
+                  if (_supportsQrScan) ...[
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          Navigator.of(dialogContext).pop();
+                          await _importProfileFromQr();
+                        },
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('QR로 Wi-Fi 추가'),
+                      ),
+                    ),
+                  ],
                 ],
               );
             },
@@ -777,6 +796,80 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         );
       },
     );
+  }
+
+  /// QR scanning needs a camera, so it is offered only where there is one.
+  bool get _supportsQrScan => io.Platform.isAndroid || io.Platform.isIOS;
+
+  /// Adds a network read from its Wi-Fi share QR code.
+  ///
+  /// An SSID the app already knows is skipped rather than overwritten, so a
+  /// scan can never replace a profile the user set up — the one exception is
+  /// filling a password that is still blank.
+  Future<void> _importProfileFromQr() async {
+    final payload = await Navigator.of(context).push<WifiQrPayload>(
+      MaterialPageRoute(builder: (_) => const WifiQrScanPage()),
+    );
+    if (payload == null || !mounted) return;
+
+    final existing = _networkProfiles
+        .where((profile) => profile.ssid == payload.ssid)
+        .firstOrNull;
+    if (existing != null && (existing.password ?? '').isNotEmpty) {
+      setState(() {
+        _message = '${payload.ssid}은(는) 이미 등록되어 있어 건너뛰었습니다.';
+        _messageIsError = false;
+      });
+      return;
+    }
+    if (payload.isOpen && existing == null) {
+      // Nothing to remember for an open network beyond its name.
+      await _saveScannedProfile(
+        NetworkProfile(
+          id: payload.ssid,
+          ssid: payload.ssid,
+          displayName: payload.ssid,
+        ),
+        added: true,
+      );
+      return;
+    }
+    if (payload.password == null) {
+      setState(() {
+        _message = '${payload.ssid} QR에 비밀번호가 없습니다.';
+        _messageIsError = true;
+      });
+      return;
+    }
+    await _saveScannedProfile(
+      (existing ?? NetworkProfile(
+            id: payload.ssid,
+            ssid: payload.ssid,
+            displayName: payload.ssid,
+          ))
+          .copyWith(password: payload.password),
+      added: existing == null,
+    );
+  }
+
+  Future<void> _saveScannedProfile(
+    NetworkProfile profile, {
+    required bool added,
+  }) async {
+    final merged = [
+      ..._networkProfiles.where((item) => item.ssid != profile.ssid),
+      profile,
+    ];
+    await _profileRepository.save(merged);
+    await _profileRepository.allowAutoDiscovery(profile.ssid);
+    if (!mounted) return;
+    setState(() {
+      _networkProfiles = merged;
+      _message = added
+          ? '${profile.ssid}을(를) QR에서 추가했습니다.'
+          : '${profile.ssid}의 비어 있던 비밀번호를 QR에서 채웠습니다.';
+      _messageIsError = false;
+    });
   }
 
   Future<void> _deleteProfile(NetworkProfile profile) async {
