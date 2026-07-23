@@ -225,6 +225,42 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('imports saved Wi-Fi passwords without overwriting typed ones', (
+    tester,
+  ) async {
+    final repository = _MemoryProfileRepository([
+      const NetworkProfile(
+        id: 'madwind-5G',
+        ssid: 'madwind-5G',
+        displayName: 'madwind-5G',
+        password: 'typed-by-user',
+      ),
+      const NetworkProfile(
+        id: 'madwind-L',
+        ssid: 'madwind-L',
+        displayName: 'madwind-L',
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      WifiScanApp(
+        discoveryService: const _FakeDiscoveryService(),
+        inventoryRepository: InventoryRepository(store: _MemorySnapshotStore()),
+        connectionService: const _FakeConnectionService(
+          saved: {'madwind-5G': 'from-windows', 'madwind-L': 'from-windows-L'},
+        ),
+        profileRepository: repository,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final bySsid = {
+      for (final profile in repository.profiles) profile.ssid: profile,
+    };
+    expect(bySsid['madwind-5G']?.password, 'typed-by-user');
+    expect(bySsid['madwind-L']?.password, 'from-windows-L');
+  });
+
   testWidgets('phone-width home screen keeps its blocks from overlapping', (
     tester,
   ) async {
@@ -597,13 +633,20 @@ class _FailingDiscoveryService implements NetworkDiscoveryService {
 }
 
 class _FakeConnectionService implements NetworkConnectionService {
-  const _FakeConnectionService({this.availableProfiles = const []});
+  const _FakeConnectionService({
+    this.availableProfiles = const [],
+    this.saved = const {},
+  });
 
   final List<NetworkProfile> availableProfiles;
+  final Map<String, String> saved;
 
   @override
   Future<List<NetworkProfile>> discoverAvailableProfiles() async =>
       availableProfiles;
+
+  @override
+  Future<Map<String, String>> savedPasswords() async => saved;
 
   @override
   Future<String?> currentSsid() async => null;

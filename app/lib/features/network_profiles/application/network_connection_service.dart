@@ -23,6 +23,14 @@ enum WifiBand {
 abstract interface class NetworkConnectionService {
   Future<List<NetworkProfile>> discoverAvailableProfiles();
 
+  /// Wi-Fi passphrases the operating system already has saved, keyed by SSID.
+  ///
+  /// Only platforms that expose the user's own saved credentials return
+  /// anything. Android deliberately does not: saved passphrases live in
+  /// system-only storage and its API redacts them, so it returns an empty map
+  /// and the user imports networks another way.
+  Future<Map<String, String>> savedPasswords();
+
   Future<String?> currentSsid();
 
   /// Reads the radio band of the currently connected interface.

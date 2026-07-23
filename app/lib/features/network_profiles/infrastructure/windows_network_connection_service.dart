@@ -24,6 +24,79 @@ class WindowsNetworkConnectionService implements NetworkConnectionService {
     ];
   }
 
+  /// Reads the passphrases Windows already has saved, keyed by SSID.
+  ///
+  /// Uses `netsh wlan export profile key=clear`, which writes one XML per
+  /// saved profile into a folder we own. That form takes no SSID argument, so
+  /// nothing user-controlled is ever interpolated into a command, and unlike
+  /// `show profile ... key=clear` its output is not localized. The exported
+  /// files hold plaintext passphrases, so they are read once and the folder is
+  /// deleted immediately afterwards — nothing is left on disk and nothing
+  /// leaves the machine.
+  @override
+  Future<Map<String, String>> savedPasswords() async {
+    final Directory folder;
+    try {
+      folder = await Directory.systemTemp.createTemp('wifiscan_wlan');
+    } on IOException {
+      return const {};
+    }
+    try {
+      final result = await Process.run('netsh', [
+        'wlan',
+        'export',
+        'profile',
+        'key=clear',
+        'folder=${folder.path}',
+      ]);
+      if (result.exitCode != 0) return const {};
+      final passwords = <String, String>{};
+      await for (final entity in folder.list()) {
+        if (entity is! File || !entity.path.toLowerCase().endsWith('.xml')) {
+          continue;
+        }
+        final parsed = parseExportedProfile(await entity.readAsString());
+        if (parsed != null) passwords[parsed.$1] = parsed.$2;
+      }
+      return passwords;
+    } catch (_) {
+      return const {};
+    } finally {
+      try {
+        await folder.delete(recursive: true);
+      } catch (_) {
+        // A leftover temp folder must not break profile loading.
+      }
+    }
+  }
+
+  /// Extracts `(ssid, passphrase)` from an exported WLAN profile.
+  ///
+  /// Returns null when there is nothing usable to import: open networks carry
+  /// no key, and without elevation Windows may leave the key DPAPI-protected,
+  /// in which case `keyMaterial` is an encrypted blob rather than the
+  /// passphrase.
+  static (String, String)? parseExportedProfile(String xml) {
+    final ssid = RegExp(
+      r'<name>([^<]*)</name>',
+    ).firstMatch(xml)?.group(1)?.trim();
+    if (ssid == null || ssid.isEmpty) return null;
+    final isProtected = RegExp(
+      r'<protected>\s*true\s*</protected>',
+      caseSensitive: false,
+    ).hasMatch(xml);
+    if (isProtected) return null;
+    final keyType = RegExp(
+      r'<keyType>\s*([^<\s]+)\s*</keyType>',
+    ).firstMatch(xml)?.group(1);
+    if (keyType != null && keyType.toLowerCase() != 'passphrase') return null;
+    final key = RegExp(
+      r'<keyMaterial>([^<]*)</keyMaterial>',
+    ).firstMatch(xml)?.group(1)?.trim();
+    if (key == null || key.isEmpty) return null;
+    return (ssid, key);
+  }
+
   /// Runs a read-only, argument-free `netsh` query with a forced UTF-8
   /// console codepage.
   ///

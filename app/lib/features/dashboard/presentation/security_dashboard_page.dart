@@ -166,7 +166,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         if (suppressedSsids.contains(profile.ssid)) continue;
         known.putIfAbsent(profile.ssid, () => profile);
       }
-      profiles = known.values.toList(growable: false);
+      profiles = await _fillMissingPasswords(known.values.toList());
       await _profileRepository.save(profiles);
     } catch (_) {
       // The profile list is optional and should not block the main dashboard.
@@ -182,6 +182,29 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
       _networkProfiles = profiles;
       _currentSsid = ssid;
     });
+  }
+
+  /// Fills in passphrases the OS already has saved for profiles that carry
+  /// none yet.
+  ///
+  /// A profile the user already set up is never touched: a password that is
+  /// present stays exactly as typed. Only blanks are filled, and only from
+  /// what this machine has stored itself, so importing can never clobber
+  /// something the user entered by hand.
+  Future<List<NetworkProfile>> _fillMissingPasswords(
+    List<NetworkProfile> profiles,
+  ) async {
+    final needsPassword = profiles
+        .where((profile) => (profile.password ?? '').isEmpty)
+        .isNotEmpty;
+    if (!needsPassword) return profiles;
+    Map<String, String> saved;
+    try {
+      saved = await _connectionService.savedPasswords();
+    } catch (_) {
+      return profiles;
+    }
+    return profilesWithMissingPasswordsFilled(profiles, saved);
   }
 
   Future<void> _startScan() async {

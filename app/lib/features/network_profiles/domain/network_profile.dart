@@ -1,3 +1,23 @@
+/// Fills in passphrases from [saved] for profiles that carry none yet.
+///
+/// A password the user already set is never replaced — only blanks are filled.
+/// That keeps importing what the OS has stored from ever clobbering something
+/// typed by hand, so an import can be re-run safely.
+List<NetworkProfile> profilesWithMissingPasswordsFilled(
+  List<NetworkProfile> profiles,
+  Map<String, String> saved,
+) {
+  if (saved.isEmpty) return profiles;
+  return [
+    for (final profile in profiles)
+      if ((profile.password ?? '').isEmpty &&
+          (saved[profile.ssid] ?? '').isNotEmpty)
+        profile.copyWith(password: saved[profile.ssid])
+      else
+        profile,
+  ];
+}
+
 class NetworkProfile {
   const NetworkProfile({
     required this.id,

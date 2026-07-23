@@ -18,6 +18,9 @@ class _UnsupportedNetworkConnectionService implements NetworkConnectionService {
   Future<List<NetworkProfile>> discoverAvailableProfiles() async => const [];
 
   @override
+  Future<Map<String, String>> savedPasswords() async => const {};
+
+  @override
   Future<String?> currentSsid() async => null;
 
   @override

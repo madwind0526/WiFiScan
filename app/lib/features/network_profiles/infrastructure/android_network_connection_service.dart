@@ -11,6 +11,12 @@ class AndroidNetworkConnectionService implements NetworkConnectionService {
   @override
   Future<List<NetworkProfile>> discoverAvailableProfiles() async => const [];
 
+  /// Always empty: Android keeps saved passphrases in system-only storage and
+  /// redacts them from app APIs, so they cannot be read without rooting the
+  /// device. Networks are imported by the user instead.
+  @override
+  Future<Map<String, String>> savedPasswords() async => const {};
+
   @override
   Future<String?> currentSsid() async {
     return _channel.invokeMethod<String>('currentSsid');
