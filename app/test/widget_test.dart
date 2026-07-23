@@ -254,6 +254,19 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // Reading saved passphrases is user-initiated, so nothing is imported
+    // until the button is pressed.
+    expect(
+      repository.profiles
+          .firstWhere((profile) => profile.ssid == 'madwind-L')
+          .password,
+      isNull,
+    );
+    await tester.tap(find.byTooltip('네트워크 프로필'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('이 PC에 저장된 비밀번호 가져오기'));
+    await tester.pumpAndSettle();
+
     final bySsid = {
       for (final profile in repository.profiles) profile.ssid: profile,
     };
@@ -293,9 +306,11 @@ void main() {
     expect(title.right, lessThanOrEqualTo(chip.left));
     expect(chip.right, lessThanOrEqualTo(actions.left));
 
-    // The counters sit above the footer note, never across it.
+    // The counters sit above the footer note, never across it. Anchored on the
+    // LAST counter row: the first one clears the footer even in the broken
+    // layout, so measuring it would assert nothing.
     final counters = tester.getRect(
-      find.byKey(const ValueKey('visible-device-count')),
+      find.byKey(const ValueKey('visible-network-count')),
     );
     final footer = tester.getRect(
       find.text('스캔 후 인터페이스, 게이트웨이, 검색 범위가 표시됩니다.'),

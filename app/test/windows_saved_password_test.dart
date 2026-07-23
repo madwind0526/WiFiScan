@@ -25,6 +25,33 @@ String _profileXml({
 
 void main() {
   group('WindowsNetworkConnectionService.parseExportedProfile', () {
+    test('decodes XML entities in the SSID and passphrase', () {
+      // Windows escapes the payload, so reading the raw text would store a
+      // passphrase that silently fails to connect.
+      final parsed = WindowsNetworkConnectionService.parseExportedProfile(
+        _profileXml(
+          name: 'Home &amp; Away',
+          keyType: 'passPhrase',
+          keyMaterial: 'a&amp;b&lt;c&gt;d',
+        ),
+      );
+
+      expect(parsed?.$1, 'Home & Away');
+      expect(parsed?.$2, 'a&b<c>d');
+    });
+
+    test('keeps spaces at the edges of a passphrase', () {
+      final parsed = WindowsNetworkConnectionService.parseExportedProfile(
+        _profileXml(
+          name: 'spaced',
+          keyType: 'passPhrase',
+          keyMaterial: ' pad ',
+        ),
+      );
+
+      expect(parsed?.$2, ' pad ');
+    });
+
     test('reads the SSID and passphrase from an exported profile', () {
       final parsed = WindowsNetworkConnectionService.parseExportedProfile(
         _profileXml(

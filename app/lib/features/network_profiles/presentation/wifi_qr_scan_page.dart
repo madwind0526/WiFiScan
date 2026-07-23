@@ -4,10 +4,10 @@ import 'package:wifi_scan/features/network_profiles/domain/wifi_qr_payload.dart'
 
 /// Camera view that reads one Wi-Fi QR code and returns what it holds.
 ///
-/// Android's Settings → Wi-Fi → network → 공유 prints exactly this code, so a
-/// network saved on the phone can be handed to the app without the passphrase
-/// ever being typed. Nothing is stored here: the payload is returned to the
-/// caller, which decides whether to keep it.
+/// Android's Wi-Fi settings print exactly this code for a saved network, so it
+/// can be handed to the app without the passphrase ever being typed. Nothing is
+/// stored here: the payload is returned to the caller, which decides whether to
+/// keep it.
 class WifiQrScanPage extends StatefulWidget {
   const WifiQrScanPage({super.key});
 

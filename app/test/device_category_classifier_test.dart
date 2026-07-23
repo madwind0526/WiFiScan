@@ -30,6 +30,22 @@ void main() {
     expect(inferDeviceCategory(_named('Tuya Smart Plug')), DeviceCategory.iot);
   });
 
+  test('matches short keywords only as whole words', () {
+    // 'westbrook' contains 'stb', 'headphones' contains 'phone' — neither is
+    // a TV or a phone.
+    expect(inferDeviceCategory(_named('westbrook-pc')), isNot(
+      DeviceCategory.television,
+    ));
+    expect(
+      inferDeviceCategory(_named('Anker-Soundcore-Headphones')),
+      isNot(DeviceCategory.phone),
+    );
+    // The real names still classify.
+    expect(inferDeviceCategory(_named('BID-AT200/IPTV/STB')),
+        DeviceCategory.television);
+    expect(inferDeviceCategory(_named('hyojeong-Phone')), DeviceCategory.phone);
+  });
+
   test('returns null for unrecognizable names', () {
     expect(inferDeviceCategory(_named('madwind99')), isNull);
     expect(inferDeviceCategory(_named('linar-thing')), isNull);

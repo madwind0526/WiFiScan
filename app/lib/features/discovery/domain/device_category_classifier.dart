@@ -19,28 +19,37 @@ DeviceCategory? inferDeviceCategory(NetworkDevice device) {
 
   bool containsAny(List<String> values) => values.any(evidence.contains);
 
+  /// Matches whole tokens only, for strings short enough to turn up inside
+  /// unrelated names: "westbrook-pc" contains "stb", "headphones" contains
+  /// "phone". Separators such as `-`, `/` and spaces count as boundaries.
+  bool containsAnyWord(List<String> values) => values.any(
+    (value) =>
+        RegExp('(?<![a-z0-9])${RegExp.escape(value)}(?![a-z0-9])')
+            .hasMatch(evidence),
+  );
+
   if (containsAny(const ['router', 'gateway', 'iptime', 'a6004ns'])) {
     return DeviceCategory.router;
   }
-  if (containsAny(const [
-    'bid-at',
-    'iptv',
-    'stb',
-    'smart tv',
-    'smarttv',
-    'androidtv',
-    'googlecast',
-    'chromecast',
-    'webos',
-    'bravia',
-    'tizen',
-    'roku',
-    'apple tv',
-    'appletv',
-    'set-top',
-    'settop',
-    'mediarenderer',
-  ])) {
+  if (containsAnyWord(const ['stb']) ||
+      containsAny(const [
+        'bid-at',
+        'iptv',
+        'smart tv',
+        'smarttv',
+        'androidtv',
+        'googlecast',
+        'chromecast',
+        'webos',
+        'bravia',
+        'tizen',
+        'roku',
+        'apple tv',
+        'appletv',
+        'set-top',
+        'settop',
+        'mediarenderer',
+      ])) {
     return DeviceCategory.television;
   }
   if (containsAny(const ['printer', ' ipp ', 'airprint'])) {
@@ -82,20 +91,19 @@ DeviceCategory? inferDeviceCategory(NetworkDevice device) {
   ])) {
     return DeviceCategory.iot;
   }
-  if (containsAny(const [
-    'iphone',
-    'ipad',
-    'galaxy',
-    'pixel',
-    ' phone',
-    'phone',
-    'mobile',
-    'mobdev',
-    'z-flip',
-    'zflip',
-    'z-fold',
-    'sm-',
-  ])) {
+  if (containsAnyWord(const ['phone']) ||
+      containsAny(const [
+        'iphone',
+        'ipad',
+        'galaxy',
+        'pixel',
+        'mobile',
+        'mobdev',
+        'z-flip',
+        'zflip',
+        'z-fold',
+        'sm-',
+      ])) {
     return DeviceCategory.phone;
   }
   if (containsAny(const [

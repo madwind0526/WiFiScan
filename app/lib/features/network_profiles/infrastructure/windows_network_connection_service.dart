@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:xml/xml.dart';
 import 'package:wifi_scan/features/network_profiles/application/network_connection_service.dart';
 import 'package:wifi_scan/features/network_profiles/domain/network_profile.dart';
 
@@ -33,11 +34,16 @@ class WindowsNetworkConnectionService implements NetworkConnectionService {
   /// files hold plaintext passphrases, so they are read once and the folder is
   /// deleted immediately afterwards — nothing is left on disk and nothing
   /// leaves the machine.
+  static const _exportFolderPrefix = 'wifiscan_wlan';
+
   @override
   Future<Map<String, String>> savedPasswords() async {
+    // A run killed before its cleanup would leave plaintext behind, so clear
+    // any folder an earlier run failed to remove before adding another.
+    await _sweepStaleExports();
     final Directory folder;
     try {
-      folder = await Directory.systemTemp.createTemp('wifiscan_wlan');
+      folder = await Directory.systemTemp.createTemp(_exportFolderPrefix);
     } on IOException {
       return const {};
     }
@@ -65,34 +71,63 @@ class WindowsNetworkConnectionService implements NetworkConnectionService {
       try {
         await folder.delete(recursive: true);
       } catch (_) {
-        // A leftover temp folder must not break profile loading.
+        // A leftover temp folder must not break profile loading; the next run
+        // sweeps it.
       }
     }
   }
 
+  /// Deletes export folders a previous run left behind.
+  Future<void> _sweepStaleExports() async {
+    try {
+      await for (final entity in Directory.systemTemp.list()) {
+        if (entity is! Directory) continue;
+        final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+        if (!name.startsWith(_exportFolderPrefix)) continue;
+        try {
+          await entity.delete(recursive: true);
+        } catch (_) {
+          // Another instance may hold it open; leave it for next time.
+        }
+      }
+    } catch (_) {
+      // An unreadable temp directory must not block the import.
+    }
+  }
+
   /// Extracts `(ssid, passphrase)` from an exported WLAN profile.
+  ///
+  /// Parsed as XML rather than scraped with a regex, because Windows escapes
+  /// the payload: a passphrase of `p&w` is written `p&amp;w`, and reading the
+  /// raw text would store a passphrase that silently fails to connect.
   ///
   /// Returns null when there is nothing usable to import: open networks carry
   /// no key, and without elevation Windows may leave the key DPAPI-protected,
   /// in which case `keyMaterial` is an encrypted blob rather than the
   /// passphrase.
   static (String, String)? parseExportedProfile(String xml) {
-    final ssid = RegExp(
-      r'<name>([^<]*)</name>',
-    ).firstMatch(xml)?.group(1)?.trim();
-    if (ssid == null || ssid.isEmpty) return null;
-    final isProtected = RegExp(
-      r'<protected>\s*true\s*</protected>',
-      caseSensitive: false,
-    ).hasMatch(xml);
+    final XmlDocument document;
+    try {
+      document = XmlDocument.parse(xml);
+    } on XmlException {
+      return null;
+    }
+    final names = document.findAllElements('name');
+    if (names.isEmpty) return null;
+    final ssid = names.first.innerText.trim();
+    if (ssid.isEmpty) return null;
+
+    final keys = document.findAllElements('sharedKey');
+    if (keys.isEmpty) return null;
+    final sharedKey = keys.first;
+    final isProtected =
+        sharedKey.getElement('protected')?.innerText.trim().toLowerCase() ==
+        'true';
     if (isProtected) return null;
-    final keyType = RegExp(
-      r'<keyType>\s*([^<\s]+)\s*</keyType>',
-    ).firstMatch(xml)?.group(1);
+    final keyType = sharedKey.getElement('keyType')?.innerText.trim();
     if (keyType != null && keyType.toLowerCase() != 'passphrase') return null;
-    final key = RegExp(
-      r'<keyMaterial>([^<]*)</keyMaterial>',
-    ).firstMatch(xml)?.group(1)?.trim();
+    // Not trimmed: a passphrase may legitimately start or end with a space.
+    final key = sharedKey.getElement('keyMaterial')?.innerText;
     if (key == null || key.isEmpty) return null;
     return (ssid, key);
   }

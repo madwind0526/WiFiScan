@@ -169,7 +169,7 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
         if (suppressedSsids.contains(profile.ssid)) continue;
         known.putIfAbsent(profile.ssid, () => profile);
       }
-      profiles = await _fillMissingPasswords(known.values.toList());
+      profiles = known.values.toList(growable: false);
       await _profileRepository.save(profiles);
     } catch (_) {
       // The profile list is optional and should not block the main dashboard.
@@ -187,27 +187,67 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
     });
   }
 
+  /// Whether this platform can hand over passphrases it has already saved.
+  bool get _supportsSavedPasswordImport =>
+      !io.Platform.isAndroid && !io.Platform.isIOS;
+
   /// Fills in passphrases the OS already has saved for profiles that carry
   /// none yet.
+  ///
+  /// Deliberately user-initiated rather than run at startup: reading them out
+  /// of Windows writes every saved passphrase to a temp file for a moment, and
+  /// that should happen when the user asks for it, not silently on launch.
   ///
   /// A profile the user already set up is never touched: a password that is
   /// present stays exactly as typed. Only blanks are filled, and only from
   /// what this machine has stored itself, so importing can never clobber
   /// something the user entered by hand.
-  Future<List<NetworkProfile>> _fillMissingPasswords(
-    List<NetworkProfile> profiles,
-  ) async {
-    final needsPassword = profiles
+  Future<void> _importSavedPasswords() async {
+    final blanks = _networkProfiles
         .where((profile) => (profile.password ?? '').isEmpty)
-        .isNotEmpty;
-    if (!needsPassword) return profiles;
-    Map<String, String> saved;
+        .length;
+    if (blanks == 0) {
+      setState(() {
+        _message = '모든 프로필에 이미 비밀번호가 있어 가져올 것이 없습니다.';
+        _messageIsError = false;
+      });
+      return;
+    }
+    setState(() {
+      _message = '이 PC에 저장된 Wi-Fi 비밀번호를 확인하는 중입니다…';
+      _messageIsError = false;
+    });
+    final Map<String, String> saved;
     try {
       saved = await _connectionService.savedPasswords();
     } catch (_) {
-      return profiles;
+      if (!mounted) return;
+      setState(() {
+        _message = '저장된 Wi-Fi 비밀번호를 읽지 못했습니다.';
+        _messageIsError = true;
+      });
+      return;
     }
-    return profilesWithMissingPasswordsFilled(profiles, saved);
+    if (!mounted) return;
+    final filled = profilesWithMissingPasswordsFilled(_networkProfiles, saved);
+    final added = filled
+        .where((profile) => (profile.password ?? '').isNotEmpty)
+        .length;
+    final gained = added - (_networkProfiles.length - blanks);
+    if (gained <= 0) {
+      setState(() {
+        _message = '이 PC에 저장된 비밀번호 중 채울 수 있는 것이 없습니다.';
+        _messageIsError = false;
+      });
+      return;
+    }
+    await _profileRepository.save(filled);
+    if (!mounted) return;
+    setState(() {
+      _networkProfiles = filled;
+      _message = '저장된 비밀번호 $gained개를 가져왔습니다. 기존 비밀번호는 그대로 두었습니다.';
+      _messageIsError = false;
+    });
   }
 
   Future<void> _startScan() async {
@@ -776,6 +816,20 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                   // The phone cannot hand over its saved passphrases, but the
                   // user can point the camera at the QR its Wi-Fi settings
                   // print for one network at a time.
+                  if (_supportsSavedPasswordImport) ...[
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          Navigator.of(dialogContext).pop();
+                          await _importSavedPasswords();
+                        },
+                        icon: const Icon(Icons.key_outlined),
+                        label: const Text('이 PC에 저장된 비밀번호 가져오기'),
+                      ),
+                    ),
+                  ],
                   if (_supportsQrScan) ...[
                     const SizedBox(height: 8),
                     SizedBox(
@@ -1162,8 +1216,10 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                   Text(
                     footerText,
                     textAlign: TextAlign.center,
+                    // Not multiplied by `scale`: the app-wide text scaler in
+                    // WifiScanApp already applies it to every font size.
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      fontSize: 10 * scale,
+                      fontSize: 10,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
@@ -2829,7 +2885,10 @@ class _TopBar extends StatelessWidget {
     final scale = layoutScale(context);
     final buttonSize = 34 * scale;
     return Container(
-      height: 58 * scale,
+      // A minimum, not a fixed height: at large system font sizes the brand
+      // block is taller than the bar's design height and must grow rather
+      // than overflow.
+      constraints: BoxConstraints(minHeight: 58 * scale),
       padding: EdgeInsets.symmetric(horizontal: 12 * scale),
       decoration: BoxDecoration(
         color: scheme.surface,
@@ -2871,9 +2930,11 @@ class _TopBar extends StatelessWidget {
                           _buildVersion,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
+                          // Font sizes are scaled app-wide by the text scaler,
+                          // so only the layout metrics use `scale` here.
                           style: Theme.of(context).textTheme.labelSmall
                               ?.copyWith(
-                                fontSize: 10 * scale,
+                                fontSize: 10,
                                 color: scheme.onSurfaceVariant,
                               ),
                         ),
@@ -3453,6 +3514,7 @@ class _MiniSummary extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         _MiniSummaryRow(
+          key: const ValueKey('visible-network-count'),
           icon: Icons.wifi,
           value: '$scannedNetworkCount/$networkCount',
           tooltip: '네트워크',
