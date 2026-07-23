@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:wifi_scan/features/discovery/domain/router_connector.dart';
 import 'package:wifi_scan/features/discovery/domain/router_dhcp_client.dart';
 
 /// Read-only connector for a user-owned ipTIME router.
@@ -10,7 +12,7 @@ import 'package:wifi_scan/features/discovery/domain/router_dhcp_client.dart';
 /// `timepro.cgi`. It never guesses passwords, never changes settings, and
 /// never sends queried data anywhere. Dart's [HttpClient] tolerates the
 /// router's HTTP/1.0 responses (verified against A6004NS-M).
-class IptimeRouterConnector {
+class IptimeRouterConnector implements RouterConnector {
   IptimeRouterConnector({
     HttpClient? httpClient,
     this.timeout = const Duration(seconds: 8),
@@ -19,20 +21,89 @@ class IptimeRouterConnector {
   final HttpClient _client;
   final Duration timeout;
 
+  @override
+  String get id => 'iptime';
+
+  @override
+  String get displayName => 'ipTIME';
+
+  /// LAN-side ipTIME admin login has no captcha by default, so saved
+  /// credentials can log in without prompting the user.
+  @override
+  bool get requiresCaptcha => false;
+
   static const _loginPath = '/sess-bin/login_handler.cgi';
+  static const _loginPagePath = '/sess-bin/login_session.cgi';
+
+  /// Markers ipTIME firmwares serve on their root or login page.
+  static const _fingerprints = [
+    'sess-bin',
+    'login_session',
+    'iptime',
+    'timepro',
+    'efm_session',
+  ];
+
+  /// Pages probed for those markers. Newer firmware answers `/` with a bare
+  /// meta-refresh to `/login/login.cgi` and only that page names `sess-bin`
+  /// (verified against the live A6004NS-M); older ones expose the session CGI
+  /// directly.
+  static const _probePaths = ['/', '/login/login.cgi', _loginPagePath];
+
+  /// Detection probes stay short so an unreachable host fails fast.
+  static const _probeTimeout = Duration(seconds: 4);
+
+  @override
+  Future<bool> matches(String host) async {
+    for (final path in _probePaths) {
+      final text = await _probe(host, path);
+      if (text == null) continue;
+      if (_fingerprints.any(text.contains)) return true;
+    }
+    return false;
+  }
+
+  /// GETs [path] read-only, returning body plus redirect target in lower case,
+  /// or null when the host does not answer.
+  Future<String?> _probe(String host, String path) async {
+    try {
+      final request = await _client
+          .getUrl(Uri.parse('http://$host$path'))
+          .timeout(_probeTimeout);
+      request.followRedirects = false;
+      final response = await request.close().timeout(_probeTimeout);
+      final body = await response.transform(latin1.decoder).join();
+      final location = response.headers.value(HttpHeaders.locationHeader) ?? '';
+      return '$body $location'.toLowerCase();
+    } on Exception catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<Uint8List> fetchCaptcha(String host) {
+    throw UnsupportedError('ipTIME 로그인은 캡차를 사용하지 않습니다.');
+  }
 
   /// Logs in and returns the `efm_session_id` session token.
   ///
+  /// [captcha] is ignored: LAN-side ipTIME login runs with captcha off.
   /// Throws [RouterQueryException] on a wrong password or unreachable router.
-  Future<String> login(RouterCredentials credentials) async {
-    final uri = Uri.parse('http://${credentials.host}$_loginPath');
+  @override
+  Future<String> login({
+    required String host,
+    required String username,
+    required String password,
+    String captcha = '',
+  }) async {
+    final uri = Uri.parse('http://$host$_loginPath');
     // Field names match ipTIME's login form; captcha is assumed off (the
     // default for LAN-side admin login).
     final form = {
       'init_status': '1',
       'captcha_on': '0',
-      'username': credentials.username.isEmpty ? 'admin' : credentials.username,
-      'passwd': credentials.password,
+      'username': username.isEmpty ? 'admin' : username,
+      'passwd': password,
       'default_passwd': '',
       'captcha_file': '',
       'captcha_code': '',
@@ -57,7 +128,7 @@ class IptimeRouterConnector {
       // Match the browser's Referer (the login form page) — ipTIME checks it.
       request.headers.set(
         HttpHeaders.refererHeader,
-        'http://${credentials.host}/sess-bin/login_session.cgi',
+        'http://$host$_loginPagePath',
       );
       // The router's HTTP/1.0 server rejects chunked bodies (400), so send a
       // fixed Content-Length instead of streaming.
@@ -111,7 +182,7 @@ class IptimeRouterConnector {
   /// Fetches an admin page under `timepro.cgi` with an active [session].
   ///
   /// [tmenu]/[smenu] select the admin page. Returns the raw response body for
-  /// a parser to consume; used both by [readDhcpClients] and by endpoint
+  /// a parser to consume; used both by [readDevices] and by endpoint
   /// discovery against a live device.
   Future<String> fetchAdminPage({
     required String host,
@@ -159,7 +230,8 @@ class IptimeRouterConnector {
   ///
   /// Returns an empty list if the router exposes none of the known pages; the
   /// caller treats that as "no data" rather than an error.
-  Future<List<RouterDhcpClient>> readDhcpClients({
+  @override
+  Future<List<RouterDhcpClient>> readDevices({
     required String host,
     required String session,
   }) async {
@@ -301,6 +373,7 @@ class IptimeRouterConnector {
     return _hostnameToken.hasMatch(token) && _hasLetter.hasMatch(token);
   }
 
+  @override
   void close() => _client.close(force: true);
 
   static String? _sessionCookie(HttpClientResponse response) {

@@ -12,7 +12,11 @@ import 'package:wifi_scan/features/network_profiles/application/network_profile_
 import 'package:wifi_scan/features/network_profiles/domain/network_profile.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_backup_codec.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_transfer_file_service.dart';
+import 'dart:typed_data';
+
+import 'package:wifi_scan/features/discovery/domain/router_connector.dart';
 import 'package:wifi_scan/features/discovery/domain/router_dhcp_client.dart';
+import 'package:wifi_scan/features/discovery/infrastructure/router_connector_registry.dart';
 import 'package:wifi_scan/features/discovery/infrastructure/router_credential_store.dart';
 
 void main() {
@@ -37,6 +41,9 @@ void main() {
         inventoryRepository: InventoryRepository(store: _MemorySnapshotStore()),
         connectionService: const _FakeConnectionService(),
         routerCredentialStore: _FakeRouterCredentialStore(),
+        routerConnectors: RouterConnectorRegistry(
+          factories: [_FakeRouterConnector.new],
+        ),
       ),
     );
 
@@ -555,6 +562,43 @@ class _FakeConnectionService implements NetworkConnectionService {
 
   @override
   Future<void> restore(String? ssid) async {}
+}
+
+/// Recognizes any host without touching the network, so the gateway tap opens
+/// the login popup deterministically in tests.
+class _FakeRouterConnector implements RouterConnector {
+  @override
+  String get id => 'fake';
+
+  @override
+  String get displayName => '테스트 공유기';
+
+  @override
+  bool get requiresCaptcha => false;
+
+  @override
+  Future<bool> matches(String host) async => true;
+
+  @override
+  Future<Uint8List> fetchCaptcha(String host) async =>
+      throw UnsupportedError('no captcha');
+
+  @override
+  Future<String> login({
+    required String host,
+    required String username,
+    required String password,
+    String captcha = '',
+  }) async => 'session';
+
+  @override
+  Future<List<RouterDhcpClient>> readDevices({
+    required String host,
+    required String session,
+  }) async => const [];
+
+  @override
+  void close() {}
 }
 
 class _FakeRouterCredentialStore implements RouterCredentialStore {

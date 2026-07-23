@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:wifi_scan/features/discovery/domain/router_connector.dart';
 import 'package:wifi_scan/features/discovery/domain/router_dhcp_client.dart';
 
 /// Read-only connector for a user-owned SK Broadband gateway (e.g. GW-ME6110).
@@ -19,7 +20,7 @@ import 'package:wifi_scan/features/discovery/domain/router_dhcp_client.dart';
 /// On success the server sets an `MCRSESSIONID` cookie; the device list lives
 /// in `/asp/basic_ip_list.html` as a `szIPInfo` string of `ip,mac,name,port`
 /// entries separated by `;`.
-class SkGatewayConnector {
+class SkGatewayConnector implements RouterConnector {
   SkGatewayConnector({
     HttpClient? httpClient,
     this.timeout = const Duration(seconds: 8),
@@ -28,7 +29,47 @@ class SkGatewayConnector {
   final HttpClient _client;
   final Duration timeout;
 
+  @override
+  String get id => 'sk-broadband';
+
+  @override
+  String get displayName => 'SK브로드밴드 공유기';
+
+  /// The gateway always shows a captcha, so the user has to type it — saved
+  /// credentials alone can never complete a login here.
+  @override
+  bool get requiresCaptcha => true;
+
+  /// Markers the gateway serves on its root page or redirect target.
+  static const _fingerprints = [
+    'start.asp',
+    'captchalogin',
+    'mcr_verifyloginpasswd',
+    '/asp/',
+  ];
+
+  /// Detection probes stay short so an unreachable host fails fast.
+  static const _probeTimeout = Duration(seconds: 4);
+
+  @override
+  Future<bool> matches(String host) async {
+    try {
+      final request = await _client
+          .getUrl(Uri.parse('http://$host/'))
+          .timeout(_probeTimeout);
+      request.followRedirects = false;
+      final response = await request.close().timeout(_probeTimeout);
+      final body = await response.transform(latin1.decoder).join();
+      final location = response.headers.value(HttpHeaders.locationHeader) ?? '';
+      final text = '$body $location'.toLowerCase();
+      return _fingerprints.any(text.contains);
+    } on Exception catch (_) {
+      return false;
+    }
+  }
+
   /// Fetches the current captcha image for the user to read.
+  @override
   Future<Uint8List> fetchCaptcha(String host) async {
     try {
       final request = await _client
@@ -53,13 +94,17 @@ class SkGatewayConnector {
   }
 
   /// Logs in with the user-typed [captcha] and returns the `MCRSESSIONID`.
+  @override
   Future<String> login({
     required String host,
     required String username,
     required String password,
-    required String captcha,
+    String captcha = '',
   }) async {
     final c = captcha.trim().toLowerCase();
+    if (c.isEmpty) {
+      throw const RouterQueryException('자동입력방지문자를 입력하세요.');
+    }
     final idHash = await _sha256Hex(username);
     final passHash = await _sha256Hex(password);
     final passwdHash = await _sha256Hex('$c$passHash$c');
@@ -108,6 +153,7 @@ class SkGatewayConnector {
   }
 
   /// Reads the connected-device list using an active [session] cookie.
+  @override
   Future<List<RouterDhcpClient>> readDevices({
     required String host,
     required String session,
@@ -135,6 +181,7 @@ class SkGatewayConnector {
     }
   }
 
+  @override
   void close() => _client.close(force: true);
 
   /// Parses the `szIPInfo` device string: `ip,mac,name,port;` entries.
