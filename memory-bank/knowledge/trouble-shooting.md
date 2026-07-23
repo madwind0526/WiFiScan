@@ -151,3 +151,11 @@
 - 요청 본문은 Content-Length 고정 필요(HTTP/1.0, chunked 거부).
 - 장비 목록: `GET /asp/basic_ip_list.html` (Referer `/asp/home.html`) → `szIPInfo` 문자열 파싱. 형식 `ip,mac,hostname,port` 엔트리를 `;`로 구분. 호스트네임 예: BID-AT200/IPTV/STB, Samsung-Refrigerator, Samsung-Jet-Bot-Vacuum-Cleaner 등 21개.
 - 리버스 시 라이브 캡처 방법: 사용자가 브라우저로 로그인 후 F12 → Application → Cookies에서 MCRSESSIONID를 제공하면, 그 쿠키로 인증된 페이지를 읽어 구조 파악 가능(내 shell은 자동 로그인이 차단되므로).
+
+## 다른 서브넷 IP 프로브는 상위 장비가 대신 응답할 수 있다
+
+- 확인일: 2026-07-23 (Windows, 공유기 3대 환경)
+- 증상: `192.168.45.1`(SK 게이트웨이)을 HTTP로 찍었더니 전혀 다른 장비의 로그인 페이지(gnt2400/micro_httpd)가 200 OK로 돌아왔다. "SK 공유기 펌웨어가 원격으로 교체됐다"는 잘못된 결론으로 이어져, 사용자에게 불필요한 라벨 확인·고객센터 문의를 안내했다.
+- 원인: 그 시점 PC의 두 인터페이스가 모두 `192.168.0.x`였고 `192.168.45.0/24`에 붙어 있지 않았다. 도달 불가 IP로 간 요청이 기본 게이트웨이를 타고 상위로 나가면서, 경로상의 다른 장비(IPTV 라우터 `192.168.75.1`)가 자기 로그인 페이지로 응답했다. 그 장비는 모든 경로에 같은 페이지를 주는 catch-all이라 `/start.asp`, `/captcha.png`까지 동일한 HTML을 반환해 위장이 완벽했다.
+- 해결: 프로브 전에 `Get-NetIPConfiguration`으로 해당 서브넷에 실제 인터페이스가 붙어 있는지 확인한다(gw가 그 공유기인지). Wi-Fi를 SK망(`192.168.45.179`)에 연결한 뒤 다시 찍으니 `captchalogin`/`mcr_verifyLoginPasswd`/`/asp/`/`sha256` 마커가 그대로 있었고 `RouterConnectorRegistry.detect`도 `sk-broadband`로 정상 매칭됐다.
+- 교훈: 라우터 프로브 결과로 "장비가 바뀌었다"고 판단하기 전에, 응답한 장비가 정말 그 IP의 주인인지부터 확인할 것. 응답 본문이 예상과 다르면 펌웨어 변경보다 라우팅/도달성 문제를 먼저 의심한다.

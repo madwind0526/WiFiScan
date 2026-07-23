@@ -4,7 +4,8 @@
 
 - Wave 23에서 RouterConnector 인터페이스 리팩터링을 완료했다(계획 7단계 전부). `discovery/domain/router_connector.dart`의 공통 인터페이스(`id`/`displayName`/`requiresCaptcha`/`matches`/`fetchCaptcha`/`login`/`readDevices`/`close`)를 ipTIME·SK 커넥터가 구현하고, `RouterConnectorRegistry.detect(host)`가 등록 순서대로 `matches`를 시도해 첫 매칭 커넥터를 돌려준다(비매칭은 즉시 close, 매칭분은 호출자가 소유·close). 대시보드 `_openRouterAdmin`은 브랜드 분기 없이 `requiresCaptcha`로만 갈라지고, 팝업은 `_RouterLoginDialog` 하나로 통합(캡차면 이미지+캡차 입력칸 표시, 아니면 저장 자격증명으로 무팝업 자동 로그인). `_isSkGateway`·`_SkLoginDialog` 삭제. 새 공유기 지원 = 인터페이스 구현 + `defaultFactories` 등록만.
 - 라이브 검증(실기기): 192.168.0.1은 최신 펌웨어라 `/`가 `login/login.cgi`로 meta-refresh만 하고 ipTIME 표식이 없어 감지에 실패했다 → 탐지 경로를 `/`, `/login/login.cgi`, `/sess-bin/login_session.cgi` 3개로 넓혀 해결. 리팩터된 경로로 감지→로그인→DHCP 5개(호스트네임 4개) 조회까지 실제 성공 확인.
-- 192.168.45.1은 gnt2400 펌웨어(login.html + app.js, `goform`/`mcr_verifyLoginPasswd`/`captcha.png`/`szIPInfo` 전부 없음)로 ipTIME도 SK도 아니다. 이제 "자동 조회 미지원, 이름 직접 지정" 안내가 뜬다(예전에는 ipTIME 팝업이 떴다가 로그인 실패). gnt2400 전용 커넥터는 별도 작업 후보.
+- 사용자 망은 공유기가 3대다: `192.168.0.1` ipTIME, `192.168.45.1` SK 게이트웨이(GW-ME6110, 캡차), `192.168.75.1` GNT2400 IPTV 장비(micro_httpd, `login.cgi` + 페이지 내장 평문 캡차 `captchaVal`). 레지스트리 실측 결과 `0.1 -> iptime`, `45.1 -> sk-broadband`, `75.1 -> NO MATCH`(미지원 안내). SK 커넥터는 2026-07-23에도 정상 매칭되며 펌웨어는 바뀌지 않았다.
+- **프로브 함정(중요):** 다른 서브넷의 IP는 그 망에 인터페이스가 붙어 있지 않으면 기본 게이트웨이로 나가고, 상위 장비가 대신 200 OK로 응답할 수 있다. 2026-07-23 조사 때 PC의 두 인터페이스가 모두 `192.168.0.x`인 상태로 `192.168.45.1`을 찍었더니 상위 IPTV 장비(75.1)의 gnt2400 페이지가 돌아와 "SK 펌웨어가 교체됐다"고 오진했다. 라우터 프로브 결과는 해당 서브넷에 실제로 붙어 있는지(`Get-NetIPConfiguration`의 gw) 먼저 확인하고 해석할 것.
 - `windows_network_discovery_test.dart`, `enriched_windows_network_discovery_test.dart`는 활성 Wi-Fi가 있어야 통과하는 환경 의존 테스트다(현재 유선 연결이라 실패). 라우터 리팩터와 무관.
 
 
