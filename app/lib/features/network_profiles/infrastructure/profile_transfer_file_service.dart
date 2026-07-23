@@ -7,6 +7,12 @@ abstract interface class ProfileTransferFileService {
   Future<bool> save(String content);
 
   Future<String?> pick();
+
+  /// Path of an image the user picked, for reading a QR code out of it.
+  ///
+  /// A path rather than bytes, because the barcode decoder reads the file
+  /// itself. Returns null when the user cancels.
+  Future<String?> pickImagePath();
 }
 
 class PlatformProfileTransferFileService implements ProfileTransferFileService {
@@ -26,6 +32,16 @@ class PlatformProfileTransferFileService implements ProfileTransferFileService {
       await File(path).writeAsString(content, flush: true);
     }
     return true;
+  }
+
+  @override
+  Future<String?> pickImagePath() async {
+    final result = await FilePicker.pickFiles(
+      dialogTitle: 'Wi-Fi QR 이미지 선택',
+      type: FileType.image,
+    );
+    if (result == null || result.files.isEmpty) return null;
+    return result.files.single.path;
   }
 
   @override

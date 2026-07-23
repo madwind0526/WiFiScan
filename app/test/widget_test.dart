@@ -774,8 +774,13 @@ class _MemoryProfileTransferFileService implements ProfileTransferFileService {
   String? contentToPick;
   String? savedContent;
 
+  String? imagePathToPick;
+
   @override
   Future<String?> pick() async => contentToPick;
+
+  @override
+  Future<String?> pickImagePath() async => imagePathToPick;
 
   @override
   Future<bool> save(String content) async {

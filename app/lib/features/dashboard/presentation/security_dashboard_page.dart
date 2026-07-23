@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:wifi_scan/app/responsive.dart';
 import 'package:wifi_scan/features/dashboard/domain/network_overview.dart';
 import 'package:wifi_scan/features/dashboard/presentation/obsidian_mesh_graph.dart';
@@ -785,7 +786,19 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                           await _importProfileFromQr();
                         },
                         icon: const Icon(Icons.qr_code_scanner),
-                        label: const Text('QR로 Wi-Fi 추가'),
+                        label: const Text('카메라로 QR 스캔'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          Navigator.of(dialogContext).pop();
+                          await _importProfileFromQrImage();
+                        },
+                        icon: const Icon(Icons.image_outlined),
+                        label: const Text('QR 이미지 파일에서 추가'),
                       ),
                     ),
                   ],
@@ -801,17 +814,64 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
   /// QR scanning needs a camera, so it is offered only where there is one.
   bool get _supportsQrScan => io.Platform.isAndroid || io.Platform.isIOS;
 
-  /// Adds a network read from its Wi-Fi share QR code.
-  ///
-  /// An SSID the app already knows is skipped rather than overwritten, so a
-  /// scan can never replace a profile the user set up — the one exception is
-  /// filling a password that is still blank.
+  /// Adds a network by pointing the camera at its Wi-Fi share QR code.
   Future<void> _importProfileFromQr() async {
     final payload = await Navigator.of(context).push<WifiQrPayload>(
       MaterialPageRoute(builder: (_) => const WifiQrScanPage()),
     );
     if (payload == null || !mounted) return;
+    await _applyScannedProfile(payload);
+  }
 
+  /// Adds a network from a saved QR image — a screenshot of the phone's Wi-Fi
+  /// share screen, or a photo of the sticker on a router.
+  Future<void> _importProfileFromQrImage() async {
+    final String? path;
+    try {
+      path = await _profileTransferFileService.pickImagePath();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _message = '이미지를 여는 중 오류가 발생했습니다.';
+          _messageIsError = true;
+        });
+      }
+      return;
+    }
+    if (path == null || !mounted) return;
+
+    final controller = MobileScannerController();
+    BarcodeCapture? capture;
+    try {
+      capture = await controller.analyzeImage(path);
+    } catch (_) {
+      capture = null;
+    } finally {
+      await controller.dispose();
+    }
+    if (!mounted) return;
+
+    for (final barcode in capture?.barcodes ?? const <Barcode>[]) {
+      final payload = parseWifiQr(barcode.rawValue ?? '');
+      if (payload != null) {
+        await _applyScannedProfile(payload);
+        return;
+      }
+    }
+    setState(() {
+      _message = capture == null || capture.barcodes.isEmpty
+          ? '이미지에서 QR 코드를 찾지 못했습니다.'
+          : 'Wi-Fi QR 코드가 아닙니다.';
+      _messageIsError = true;
+    });
+  }
+
+  /// Stores a scanned network.
+  ///
+  /// An SSID the app already knows is skipped rather than overwritten, so a
+  /// scan can never replace a profile the user set up — the one exception is
+  /// filling a password that is still blank.
+  Future<void> _applyScannedProfile(WifiQrPayload payload) async {
     final existing = _networkProfiles
         .where((profile) => profile.ssid == payload.ssid)
         .firstOrNull;
