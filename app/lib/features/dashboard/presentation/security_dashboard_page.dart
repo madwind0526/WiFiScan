@@ -34,7 +34,7 @@ import 'package:wifi_scan/features/network_profiles/infrastructure/platform_netw
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_backup_codec.dart';
 import 'package:wifi_scan/features/network_profiles/infrastructure/profile_transfer_file_service.dart';
 
-const String _buildVersion = 'v1.3.0+9';
+const String _buildVersion = 'v1.4.0+10';
 
 enum _DashboardSection { overview, networks, devices, findings }
 

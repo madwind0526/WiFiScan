@@ -1,5 +1,17 @@
 # Patterns
 
+## Router Connector Interface
+
+공유기별 분기를 UI에 두지 않는다. `RouterConnector`(`id`/`displayName`/`requiresCaptcha`/`matches`/`fetchCaptcha`/`login`/`readDevices`/`close`)를 구현하고 `RouterConnectorRegistry.defaultFactories`에 등록하면 끝이다. 레지스트리가 등록 순서대로 `matches(host)`를 시도해 첫 매칭 커넥터를 돌려주고(비매칭은 즉시 close, 매칭분은 호출자가 소유), 화면은 `requiresCaptcha`로만 갈라진다. 매칭이 없으면 null → "자동 조회 미지원" 안내로 폴백한다. 브랜드 이름으로 감지하지 말고 **로그인 페이지가 실제로 내놓는 표식**으로 감지하되, 최신 펌웨어가 루트에서 리다이렉트만 하는 경우가 있으므로 후보 경로를 여러 개 둔다(ipTIME: `/`, `/login/login.cgi`, `/sess-bin/login_session.cgi`).
+
+## Screen-Width Scaling
+
+고정 dp 값과 `Stack` 절대 배치는 좁은 화면에서 겹친다. 두 가지를 함께 쓴다. (1) 겹칠 수 없는 구조로 만든다 — 상단바는 `Row`, 아래에 쌓이는 요소는 하나의 bottom-anchored `Column`. (2) `layoutScale(context)`(화면 폭/430, 하한 0.85)를 패딩·아이콘·높이에 곱하고, `MaterialApp.builder`에서 텍스트 스케일러에도 곱해 글씨가 함께 줄게 한다. 사용자 시스템 글꼴 배율은 비례로 보존한다(무시하지 않는다). 커스텀 하단 바는 `MediaQuery.viewPaddingOf(context).bottom`을 높이에 더하고 같은 값을 아래 패딩으로 줘야 안드로이드 제스처 바에 가리지 않는다.
+
+## Never Overwrite User Credentials On Import
+
+OS나 QR에서 가져온 자격 증명은 **이미 있는 값을 덮어쓰지 않는다**. 비어 있는 항목만 채우고, 이미 채워진 SSID는 건너뛰며 그 사실을 사용자에게 알린다(`profilesWithMissingPasswordsFilled`). 이렇게 하면 가져오기를 몇 번 돌려도 손으로 입력한 값이 사라지지 않는다.
+
 ## Observation Normalization
 
 공유기, 서브넷 탐색, mDNS, SSDP, 수동 확인에서 얻은 값은 관측 소스별 원본을 바로 UI에 노출하지 않는다. 공통 observation 형식으로 정규화한 뒤 신뢰도와 근거를 유지하면서 하나의 장비 자산에 연결한다.

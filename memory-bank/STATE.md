@@ -2,10 +2,10 @@
 
 ## Current Wave
 
-- **Wave:** 23
+- **Wave:** 26
 - **Status:** Complete
 - **Cache Status:** CLEAN
-- **Last Checkpoint:** 2026-07-18 Wave 23 읽기 전용 SK 게이트웨이(GW-ME6110) 커넥터: 인앱 캡차 팝업(사용자가 캡차 입력), SHA256 로그인→MCRSESSIONID→basic_ip_list.html szIPInfo 파싱, GW 클릭 시 ipTIME/SK 자동 감지. 오프라인 노드 흐림 표시(Wave 22.5)도 포함. analyze/73 tests 통과, push 완료
+- **Last Checkpoint:** 2026-07-23 Wave 24~26, `1.4.0+10`. (24) 공유기가 알려준 장비도 이름 기반 종류 분류를 태워 색이 붙게 하고, 브랜드 분기를 `RouterConnector` 인터페이스 + `RouterConnectorRegistry`로 대체해 UI는 `requiresCaptcha`로만 갈라진다. (25) 폰에서 상단바·요약/푸터가 겹치고 하단 바가 제스처 바에 가리던 문제를 구조 수정 + 화면 폭 스케일(`responsive.dart`)로 해결. (26) `netsh wlan export profile key=clear`로 Windows 저장 암호를 가져오고, 폰에서는 Wi-Fi 공유 QR을 카메라 또는 저장된 이미지로 읽어 등록한다(기존 SSID는 덮어쓰지 않고 빈 비밀번호만 채움). analyze 무이슈 / 95 tests 통과 / 실기기(Windows·SM S948N) 확인 / push 완료
 
 ## Wave History
 
@@ -35,6 +35,9 @@
 | 21 | MAC 기준 사용자 지정 장비 이름·소유 상태 영구 저장과 편집 UI | Done |
 | 22 | 읽기 전용 ipTIME 커넥터·공유기별 자격증명·GW 클릭 로그인 팝업·DHCP 호스트네임 | Done |
 | 23 | 읽기 전용 SK 게이트웨이 커넥터(인앱 캡차 팝업)·ipTIME/SK 자동 감지·오프라인 노드 표시 | Done |
+| 24 | 공유기 제공 장비 종류 분류(색상 반영)·RouterConnector 인터페이스와 커넥터 레지스트리 리팩터 | Done |
+| 25 | 휴대폰 화면 반응형 수정(상단바 겹침·요약/푸터 겹침·시스템 제스처 바 침범) | Done |
+| 26 | Windows 저장 Wi-Fi 암호 가져오기와 QR(카메라·이미지 파일) 프로필 추가 | Done |
 
 ## Session Notes
 

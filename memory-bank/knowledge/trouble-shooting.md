@@ -152,6 +152,25 @@
 - 장비 목록: `GET /asp/basic_ip_list.html` (Referer `/asp/home.html`) → `szIPInfo` 문자열 파싱. 형식 `ip,mac,hostname,port` 엔트리를 `;`로 구분. 호스트네임 예: BID-AT200/IPTV/STB, Samsung-Refrigerator, Samsung-Jet-Bot-Vacuum-Cleaner 등 21개.
 - 리버스 시 라이브 캡처 방법: 사용자가 브라우저로 로그인 후 F12 → Application → Cookies에서 MCRSESSIONID를 제공하면, 그 쿠키로 인증된 페이지를 읽어 구조 파악 가능(내 shell은 자동 로그인이 차단되므로).
 
+## Windows 저장 Wi-Fi 암호는 export로 읽는다 (show ... key=clear 아님)
+
+- 확인일: 2026-07-23 (Windows 11, 관리자 권한 없이 성공)
+- `netsh wlan show profile name="X" key=clear`는 한글 로캘에서 키 라인 파싱이 어긋난다. 실제로 "Key Content" 라인을 찾지 못했다.
+- 대신 `netsh wlan export profile key=clear folder=<dir>`는 프로필마다 XML을 쓰고 `<keyMaterial>`에 평문 암호가 들어 있다. exit 0, 관리자 권한 불필요.
+- 이 형태는 **SSID를 인자로 받지 않아** 셸 주입 위험이 없다. SSID를 명령에 끼워 넣는 방식은 피할 것.
+- 건너뛸 것: `<protected>true</protected>`(DPAPI 암호화 상태라 평문이 아님), 개방형(키 없음), `keyType != passPhrase`.
+- 내보낸 XML은 평문 비밀번호를 담으므로 **읽은 즉시 폴더 삭제**한다.
+- 실측: 저장 프로필 6개 중 4개에서 암호 파싱 성공(2개는 키 없음).
+
+## Wi-Fi QR은 파싱을 문자 단위로 해야 한다
+
+- 확인일: 2026-07-23
+- 형식: `WIFI:S:<ssid>;T:WPA;P:<pw>;H:false;;`. 값 안의 `\ ; , : "`는 백슬래시로 이스케이프된다.
+- `split(';')`이나 `split(':')`으로 자르면 이스케이프된 구분자가 든 SSID·비밀번호가 깨진다. 한 글자씩 훑으며 이스케이프 상태를 추적할 것.
+- 필드 순서는 고정이 아니다. 키를 대문자로 정규화해 맵에 담고 조회한다.
+- 갤럭시(One UI) 경로는 "공유"가 아니라 **설정 → 연결 → Wi-Fi → 네트워크 옆 톱니바퀴(⚙) → QR 코드**이고, 보통 현재 연결된 네트워크만 QR을 내준다. 폰 화면의 QR은 카메라로 찍을 수 없으므로 **스크린샷 → 이미지 파일에서 읽기** 경로가 실질적인 주 경로다.
+- `mobile_scanner`는 Android/iOS/macOS/web만 지원한다(Windows 미지원). 데스크톱에서는 QR 진입점을 숨긴다.
+
 ## 다른 서브넷 IP 프로브는 상위 장비가 대신 응답할 수 있다
 
 - 확인일: 2026-07-23 (Windows, 공유기 3대 환경)
