@@ -225,6 +225,60 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('phone-width home screen keeps its blocks from overlapping', (
+    tester,
+  ) async {
+    // A common phone viewport: the width where the title, the network chip and
+    // the action icons used to be drawn on top of each other.
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 2.75;
+    // Android's gesture bar overlays the app; the nav row must stay above it.
+    const gestureBar = FakeViewPadding(bottom: 66);
+    tester.view.padding = gestureBar;
+    tester.view.viewPadding = gestureBar;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.view.resetViewPadding);
+
+    await tester.pumpWidget(
+      WifiScanApp(
+        discoveryService: const _FakeDiscoveryService(),
+        inventoryRepository: InventoryRepository(store: _MemorySnapshotStore()),
+        connectionService: const _FakeConnectionService(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    final title = tester.getRect(find.text('WifiScan'));
+    final chip = tester.getRect(find.text('연결된 네트워크 없음'));
+    final actions = tester.getRect(find.byTooltip('설정'));
+    expect(title.right, lessThanOrEqualTo(chip.left));
+    expect(chip.right, lessThanOrEqualTo(actions.left));
+
+    // The counters sit above the footer note, never across it.
+    final counters = tester.getRect(
+      find.byKey(const ValueKey('visible-device-count')),
+    );
+    final footer = tester.getRect(
+      find.text('스캔 후 인터페이스, 게이트웨이, 검색 범위가 표시됩니다.'),
+    );
+    expect(counters.bottom, lessThanOrEqualTo(footer.top));
+
+    // Every bottom-bar icon clears the system gesture bar.
+    final safeBottom =
+        tester.view.physicalSize.height / tester.view.devicePixelRatio -
+        gestureBar.bottom / tester.view.devicePixelRatio;
+    // '네트워크' is skipped: the summary row uses that tooltip too, and these
+    // items all share the one padded bottom bar anyway.
+    for (final tooltip in ['홈', '장비', '경고']) {
+      final item = tester.getRect(find.byTooltip(tooltip));
+      expect(item.bottom, lessThanOrEqualTo(safeBottom), reason: tooltip);
+      expect(item.height, greaterThan(0), reason: tooltip);
+    }
+  });
+
   testWidgets(
     'profile editor supports keyboard, large text, save, and cancel',
     (tester) async {

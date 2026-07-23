@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:wifi_scan/app/responsive.dart';
 import 'package:wifi_scan/features/dashboard/domain/network_overview.dart';
 import 'package:wifi_scan/features/dashboard/presentation/obsidian_mesh_graph.dart';
 import 'package:wifi_scan/features/discovery/application/network_discovery_service.dart';
@@ -911,8 +912,9 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
               'GW ${network.gateway} · ${network.scannedSubnet}';
     final visibleDevices = _filteredDevices;
     final visibleWarningCount = _warningCountFor(visibleDevices);
+    final scale = layoutScale(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      padding: EdgeInsets.all(12 * scale),
       child: Container(
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
@@ -934,9 +936,9 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                 ),
               ),
             Positioned(
-              left: 12,
-              right: 12,
-              top: 12,
+              left: 12 * scale,
+              right: 12 * scale,
+              top: 12 * scale,
               child: Column(
                 children: [
                   if (_message != null)
@@ -956,31 +958,40 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
                 ],
               ),
             ),
+            // Summary and footer share one bottom-anchored column, so a
+            // footer that wraps to two lines pushes the counters up instead
+            // of being drawn over them.
             Positioned(
-              left: 16,
-              bottom: 36,
-              child: _MiniSummary(
-                deviceCount: visibleDevices.length,
-                warningCount: visibleWarningCount,
-                networkCount: _networkProfiles.length,
-                scannedNetworkCount: _networkScans.values
-                    .where((record) => !record.failed)
-                    .length,
-                onNetworksTap: () =>
-                    setState(() => _section = _DashboardSection.networks),
-              ),
-            ),
-            Positioned(
-              left: 12,
-              right: 12,
-              bottom: 10,
-              child: Text(
-                footerText,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  fontSize: 10,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              left: 12 * scale,
+              right: 12 * scale,
+              bottom: 10 * scale,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: _MiniSummary(
+                      deviceCount: visibleDevices.length,
+                      warningCount: visibleWarningCount,
+                      networkCount: _networkProfiles.length,
+                      scannedNetworkCount: _networkScans.values
+                          .where((record) => !record.failed)
+                          .length,
+                      onNetworksTap: () =>
+                          setState(() => _section = _DashboardSection.networks),
+                    ),
+                  ),
+                  SizedBox(height: 10 * scale),
+                  Text(
+                    footerText,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      fontSize: 10 * scale,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -1273,8 +1284,14 @@ class _SecurityDashboardPageState extends State<SecurityDashboardPage> {
 
   Widget _buildBottomNavigation(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final scale = layoutScale(context);
+    // Android draws its gesture bar or button row over the app, so reserve
+    // that inset below the nav row instead of letting the system bar sit on
+    // top of the icons.
+    final systemInset = MediaQuery.viewPaddingOf(context).bottom;
     return Container(
-      height: 72,
+      height: 72 * scale + systemInset,
+      padding: EdgeInsets.only(bottom: systemInset),
       decoration: BoxDecoration(
         color: scheme.surface,
         border: Border(top: BorderSide(color: scheme.outlineVariant)),
@@ -2633,103 +2650,113 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final scale = layoutScale(context);
+    final buttonSize = 34 * scale;
     return Container(
-      height: 58,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      height: 58 * scale,
+      padding: EdgeInsets.symmetric(horizontal: 12 * scale),
       decoration: BoxDecoration(
         color: scheme.surface,
         border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
       ),
       child: MediaQuery.withClampedTextScaling(
         maxScaleFactor: 1.3,
-        child: Stack(
-          alignment: Alignment.center,
+        // A Row, not a Stack: on a phone the brand, the network chip and the
+        // actions no longer have room to sit on top of each other, so each
+        // one gives way instead of overlapping.
+        child: Row(
           children: [
-            Align(
-              alignment: Alignment.center,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 200),
+            Flexible(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.wifi_tethering,
+                    color: scheme.primary,
+                    size: 22 * scale,
+                  ),
+                  SizedBox(width: 8 * scale),
+                  Flexible(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'WifiScan',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.4,
+                              ),
+                        ),
+                        Text(
+                          _buildVersion,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                fontSize: 10 * scale,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // The chip takes what is left in the middle and ellipsizes the
+            // SSID rather than pushing into its neighbours.
+            Expanded(
+              child: Center(
                 child: _CurrentNetworkChip(
                   ssid: currentSsid,
                   onTap: onTapNetwork,
                 ),
               ),
             ),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.wifi_tethering, color: scheme.primary, size: 22),
-                  const SizedBox(width: 8),
-                  Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'WifiScan',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.4,
-                            ),
-                      ),
-                      Text(
-                        _buildVersion,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          fontSize: 10,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  onPressed: onScanAll,
+                  icon: Icon(
+                    isScanning ? Icons.sync : Icons.travel_explore,
+                    size: 22 * scale,
                   ),
-                ],
-              ),
-            ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    onPressed: onScanAll,
-                    icon: Icon(isScanning ? Icons.sync : Icons.travel_explore),
-                    tooltip: '전체 네트워크 스캔',
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 34,
-                      height: 34,
-                    ),
+                  tooltip: '전체 네트워크 스캔',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints.tightFor(
+                    width: buttonSize,
+                    height: buttonSize,
                   ),
-                  IconButton(
-                    onPressed: onNetworks,
-                    icon: const Icon(Icons.wifi_find_outlined),
-                    tooltip: '네트워크 프로필',
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 34,
-                      height: 34,
-                    ),
+                ),
+                IconButton(
+                  onPressed: onNetworks,
+                  icon: Icon(Icons.wifi_find_outlined, size: 22 * scale),
+                  tooltip: '네트워크 프로필',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints.tightFor(
+                    width: buttonSize,
+                    height: buttonSize,
                   ),
-                  IconButton(
-                    onPressed: onSettings,
-                    icon: const Icon(Icons.settings_outlined),
-                    tooltip: '설정',
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 34,
-                      height: 34,
-                    ),
+                ),
+                IconButton(
+                  onPressed: onSettings,
+                  icon: Icon(Icons.settings_outlined, size: 22 * scale),
+                  tooltip: '설정',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints.tightFor(
+                    width: buttonSize,
+                    height: buttonSize,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ],
         ),
@@ -2764,8 +2791,12 @@ class _NavItem extends StatelessWidget {
             child: Align(
               alignment: Alignment.bottomCenter,
               child: Padding(
-                padding: const EdgeInsets.only(bottom: 18),
-                child: Icon(icon, size: 24, color: color),
+                padding: EdgeInsets.only(bottom: 18 * layoutScale(context)),
+                child: Icon(
+                  icon,
+                  size: 24 * layoutScale(context),
+                  color: color,
+                ),
               ),
             ),
           ),
@@ -2828,7 +2859,7 @@ class _ScanButtonState extends State<_ScanButton>
             child: Align(
               alignment: Alignment.bottomCenter,
               child: Padding(
-                padding: const EdgeInsets.only(bottom: 16),
+                padding: EdgeInsets.only(bottom: 16 * layoutScale(context)),
                 child: RotationTransition(
                   turns: _controller,
                   child: ShaderMask(
@@ -2840,9 +2871,9 @@ class _ScanButtonState extends State<_ScanButton>
                           ? [scheme.tertiary, scheme.primary]
                           : [scheme.primary, scheme.secondary],
                     ).createShader(bounds),
-                    child: const Icon(
+                    child: Icon(
                       Icons.track_changes,
-                      size: 48,
+                      size: 48 * layoutScale(context),
                       color: Colors.white,
                     ),
                   ),
@@ -3155,6 +3186,7 @@ class _CurrentNetworkChip extends StatelessWidget {
         ? const Color(0xFF2E3038)
         : const Color(0xFFE4E4EA);
     final connected = ssid != null && ssid!.isNotEmpty;
+    final scale = layoutScale(context);
     return Material(
       color: background,
       borderRadius: BorderRadius.circular(22),
@@ -3162,7 +3194,10 @@ class _CurrentNetworkChip extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          padding: EdgeInsets.symmetric(
+            horizontal: 14 * scale,
+            vertical: 9 * scale,
+          ),
           child: MediaQuery.withClampedTextScaling(
             maxScaleFactor: 1.3,
             child: Row(
@@ -3170,10 +3205,10 @@ class _CurrentNetworkChip extends StatelessWidget {
               children: [
                 Icon(
                   connected ? Icons.wifi : Icons.wifi_off,
-                  size: 16,
+                  size: 16 * scale,
                   color: connected ? scheme.primary : scheme.onSurfaceVariant,
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8 * scale),
                 Flexible(
                   child: Text(
                     connected ? ssid! : '연결된 네트워크 없음',
@@ -3185,10 +3220,10 @@ class _CurrentNetworkChip extends StatelessWidget {
                   ),
                 ),
                 if (onTap != null) ...[
-                  const SizedBox(width: 4),
+                  SizedBox(width: 4 * scale),
                   Icon(
                     Icons.expand_more,
-                    size: 18,
+                    size: 18 * scale,
                     color: scheme.onSurfaceVariant,
                   ),
                 ],
@@ -3279,8 +3314,8 @@ class _MiniSummaryRow extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 23, color: color),
-            const SizedBox(width: 7),
+            Icon(icon, size: 23 * layoutScale(context), color: color),
+            SizedBox(width: 7 * layoutScale(context)),
             Text(
               value,
               style: Theme.of(

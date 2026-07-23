@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:wifi_scan/app/responsive.dart';
 import 'package:wifi_scan/features/discovery/application/network_discovery_service.dart';
 import 'package:wifi_scan/features/dashboard/presentation/security_dashboard_page.dart';
 import 'package:wifi_scan/features/inventory/application/inventory_repository.dart';
@@ -73,6 +74,12 @@ class _WifiScanAppState extends State<WifiScanApp> {
         useMaterial3: true,
       ),
       themeMode: _themeMode,
+      // Scales every route — pages and dialogs alike — down to phone size, so
+      // text shrinks together with the paddings and icons around it.
+      builder: (context, child) => MediaQuery(
+        data: scaleTextFor(MediaQuery.of(context)),
+        child: child!,
+      ),
       home: SecurityDashboardPage(
         discoveryService: widget.discoveryService,
         inventoryRepository: widget.inventoryRepository,
